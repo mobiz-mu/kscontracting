@@ -1,0 +1,1 @@
+export { default } from "../sales/quotations/page";

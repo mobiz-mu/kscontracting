@@ -1,0 +1,86 @@
+import { NextResponse } from "next/server";
+import { createSupabaseServerClient, createSupabaseAdminClient } from "@/lib/supabase/server";
+
+export const runtime = "nodejs";
+
+type RouteContext = { params: Promise<{ id: string }> };
+
+function jsonError(status: number, payload: any) {
+  return NextResponse.json({ ok: false, ...payload }, { status });
+}
+
+function safeError(err: any) {
+  return {
+    message: err?.message ?? "Unknown error",
+    code: err?.code ?? null,
+    details: err?.details ?? null,
+    hint: err?.hint ?? null,
+  };
+}
+
+function isUuid(v: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+}
+
+export async function POST(_req: Request, ctx: RouteContext) {
+  try {
+    const { id } = await ctx.params; // ✅ Next 16: params can be Promise
+    const safeId = String(id ?? "").trim();
+
+    if (!safeId) return jsonError(400, { error: "Missing invoice id" });
+    if (!isUuid(safeId)) return jsonError(400, { error: "Invalid invoice id" });
+
+    // ✅ ensure user is authenticated (RLS session)
+    const supabase = await createSupabaseServerClient();
+    const { data: userRes, error: userErr } = await supabase.auth.getUser();
+
+    if (userErr || !userRes.user) {
+      return jsonError(401, { error: "Unauthorized", supabaseError: safeError(userErr) });
+    }
+
+    const admin = createSupabaseAdminClient();
+
+    // -------------------------
+    // Check invoice exists + belongs to user
+    // -------------------------
+    const { data: existing, error: checkErr } = await admin
+      .from("invoices")
+      .select("id, status, invoice_no, created_by")
+      .eq("id", safeId)
+      .maybeSingle();
+
+    if (checkErr) return jsonError(500, { error: "Failed to load invoice", supabaseError: safeError(checkErr) });
+    if (!existing) return jsonError(404, { error: "Invoice not found" });
+
+    // ✅ OWNER CHECK (important)
+    if (String(existing.created_by) !== String(userRes.user.id)) {
+      return jsonError(403, { error: "Forbidden" });
+    }
+
+    // Already issued? (safe)
+    if (String(existing.status ?? "").toUpperCase() === "ISSUED") {
+      return NextResponse.json({ ok: true, data: existing, message: "Invoice already issued" });
+    }
+
+    // -------------------------
+    // Issue invoice
+    // -------------------------
+    const { data, error } = await admin
+      .from("invoices")
+      .update({ status: "ISSUED", issued_at: new Date().toISOString() })
+      .eq("id", safeId)
+      .eq("created_by", userRes.user.id) // ✅ extra safety
+      .select("id, invoice_no, status, issued_at")
+      .maybeSingle();
+
+    if (error) {
+      return jsonError(500, { error: "Failed to issue invoice", supabaseError: safeError(error) });
+    }
+    if (!data) return jsonError(404, { error: "Invoice not found" });
+
+    return NextResponse.json({ ok: true, data });
+  } catch (e: any) {
+    console.error("[POST /api/invoices/[id]/issue] fatal", e);
+    return jsonError(500, { error: e?.message ?? "Internal error" });
+  }
+}
