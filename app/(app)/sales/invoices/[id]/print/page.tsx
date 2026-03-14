@@ -1,4 +1,3 @@
-// app/(app)/sales/invoices/[id]/print/page.tsx
 "use client";
 
 import * as React from "react";
@@ -14,8 +13,8 @@ type ApiInvoice = {
   id: string;
   invoice_no: string;
   status?: string | null;
+  invoice_type?: "VAT_INVOICE" | "PRO_FORMA" | string | null;
   invoice_date?: string | null;
-  due_date?: string | null;
   notes?: string | null;
   subtotal?: number | null;
   vat_amount?: number | null;
@@ -24,13 +23,12 @@ type ApiInvoice = {
   balance_amount?: number | null;
   created_at?: string | null;
   issued_at?: string | null;
+  site_address?: string | null;
   customers?: {
     id?: string | number | null;
     name?: string | null;
     brn?: string | null;
     vat_no?: string | null;
-    email?: string | null;
-    phone?: string | null;
     address?: string | null;
   } | null;
 };
@@ -40,10 +38,11 @@ type ApiItem = {
   invoice_id: string;
   description: string;
   qty: number;
-  unit_price_excl_vat: number;
-  vat_rate: number;
-  vat_amount: number;
-  line_total: number;
+  unit_price_excl_vat?: number;
+  price?: number;
+  vat_rate?: number;
+  vat_amount?: number;
+  line_total?: number;
 };
 
 function n2(v: any) {
@@ -76,7 +75,7 @@ async function safeGet<T>(url: string): Promise<T> {
 function GlassBar({ children }: { children: React.ReactNode }) {
   return (
     <div className="print:hidden">
-      <div className="relative overflow-hidden rounded-[24px] ring-1 ring-slate-200/70 bg-white/70 backdrop-blur-xl shadow-[0_18px_60px_rgba(2,6,23,0.10)]">
+      <div className="relative overflow-hidden rounded-[24px] ring-1 ring-slate-200/70 bg-white/80 backdrop-blur-xl shadow-[0_18px_60px_rgba(2,6,23,0.10)]">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(800px_260px_at_20%_0%,rgba(7,27,56,0.12),transparent_60%),radial-gradient(700px_260px_at_110%_0%,rgba(255,122,24,0.14),transparent_60%)]" />
         <div className="relative px-4 py-3 sm:px-5 sm:py-4">{children}</div>
       </div>
@@ -85,7 +84,6 @@ function GlassBar({ children }: { children: React.ReactNode }) {
 }
 
 export default function InvoicePrintPage() {
-  // ✅ Hooks MUST be inside the component
   const params = useParams();
   const id = getParamId(params);
   const hasId = isValidId(id);
@@ -110,9 +108,11 @@ export default function InvoicePrintPage() {
     setErr("");
 
     try {
-      const j = await safeGet<{ ok: boolean; data: { invoice?: ApiInvoice; items?: ApiItem[] }; error?: any }>(
-        `/api/invoices/${encodeURIComponent(id)}`
-      );
+      const j = await safeGet<{
+        ok: boolean;
+        data: { invoice?: ApiInvoice; items?: ApiItem[] };
+        error?: any;
+      }>(`/api/invoices/${encodeURIComponent(id)}`);
 
       if (!j.ok) throw new Error(j?.error ?? "Invoice not found");
 
@@ -132,22 +132,43 @@ export default function InvoicePrintPage() {
   }, [id, hasId]);
 
   React.useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
-  // Print styling (A4)
   React.useEffect(() => {
     const style = document.createElement("style");
     style.setAttribute("data-ks-print", "1");
     style.innerHTML = `
-      @page { size: A4; margin: 12mm; }
-      html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      @page { size: A4 portrait; margin: 0; }
+      html, body {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+        margin: 0;
+        padding: 0;
+        background: #fff;
+      }
+      @media print {
+        body * {
+          visibility: hidden;
+        }
+        #ks-print-root, #ks-print-root * {
+          visibility: visible;
+        }
+        #ks-print-root {
+          position: absolute;
+          inset: 0;
+          width: 210mm;
+          min-height: 297mm;
+          margin: 0 auto;
+          padding: 0;
+          background: #fff;
+        }
+      }
     `;
     document.head.appendChild(style);
     return () => style.remove();
   }, []);
 
-  // Auto-print once
   React.useEffect(() => {
     if (!autoPrint) return;
     if (!invoice) return;
@@ -173,38 +194,61 @@ export default function InvoicePrintPage() {
         : Math.max(0, total - balance);
 
     const cust = invoice.customers ?? null;
+    const invoiceType =
+      invoice.invoice_type === "PRO_FORMA" ? "PRO FORMA INVOICE" : "VAT INVOICE";
 
     return {
       company: {
         name: "KS CONTRACTING LTD",
-        tagline: "Enterprise Accounting Suite • Mauritius",
-        logoSrc: "/ks-logo.png",
-        addressLines: ["Mauritius"],
-        metaRight: ["Currency: MUR (Rs)"],
+        logoSrc: "/kslogo.png",
+        stampSrc: "/ks-stamp.png",
+        signatureSrc: "/ks-signature.png",
+        addressLines: [
+          "Lot No. 15, Morcellement Petite Bretagne, Albion",
+          "Tel: 5941 6756 • Email: ks.contracting@hotmail.com",
+          "BRN: 18160190 • VAT: 27658608",
+        ],
       },
-      doc: { variant: "invoice" },
+      doc: {
+        variant: "invoice",
+        title: invoiceType,
+        numberLabel: "No.",
+        currency: "MUR",
+      },
       invoice: {
         id: invoice.id,
         number: invoice.invoice_no,
         status: String(invoice.status ?? ""),
         issueDate: invoice.invoice_date ?? "",
-        dueDate: invoice.due_date ?? "",
+        dueDate: "",
       },
       billTo: {
         name: cust?.name ?? "—",
         lines: [
-          cust?.address ? String(cust.address) : "",
-          cust?.email ? `Email: ${cust.email}` : "",
-          cust?.phone ? `Tel: ${cust.phone}` : "",
-          [cust?.vat_no ? `VAT: ${cust.vat_no}` : "", cust?.brn ? `BRN: ${cust.brn}` : ""].filter(Boolean).join(" • "),
-        ].filter(Boolean),
+          cust?.vat_no ? `Client VAT Reg. No.: ${cust.vat_no}` : "Client VAT Reg. No.:",
+          cust?.brn ? `Client BRN No.: ${cust.brn}` : "Client BRN No.:",
+          invoice.site_address ? `Site Address: ${invoice.site_address}` : "Site Address:",
+        ],
       },
       items: (items ?? []).map((it) => {
         const qty = n2(it.qty);
-        const unit = n2(it.unit_price_excl_vat);
-        const vRate = Number.isFinite(Number(it.vat_rate)) ? n2(it.vat_rate) : undefined;
-        const vAmt = Number.isFinite(Number(it.vat_amount)) ? n2(it.vat_amount) : undefined;
-        const lineTotal = Number.isFinite(Number(it.line_total)) ? n2(it.line_total) : qty * unit + (vAmt ?? 0);
+        const unit =
+          Number.isFinite(Number(it.unit_price_excl_vat))
+            ? n2(it.unit_price_excl_vat)
+            : n2(it.price);
+
+        const vRate =
+          Number.isFinite(Number(it.vat_rate)) && n2(it.vat_rate) > 0
+            ? n2(it.vat_rate)
+            : 0.15;
+
+        const vAmt =
+          Number.isFinite(Number(it.vat_amount)) ? n2(it.vat_amount) : qty * unit * vRate;
+
+        const lineTotal =
+          Number.isFinite(Number(it.line_total))
+            ? n2(it.line_total)
+            : qty * unit + vAmt;
 
         return {
           id: String(it.id),
@@ -216,21 +260,28 @@ export default function InvoicePrintPage() {
           lineTotal,
         };
       }),
-      totals: { subtotal, vat, total, paid, balance },
-      notes:
-        invoice.notes?.trim() ||
-        "Thank you for your business. Please include the invoice number in your payment reference.",
-      paymentTerms: "Payment due by due date. Late payments may impact service scheduling.",
+      totals: {
+        subtotal,
+        vat,
+        total,
+        paid,
+        balance,
+      },
+      notes: invoice.notes?.trim() || "MCB 000446509687",
+      paymentTerms: "",
     };
   }, [invoice, items]);
 
   return (
-    <div className="px-3 py-3 sm:px-6 sm:py-6">
+    <div className="px-3 py-3 print:p-0 sm:px-6 sm:py-6">
       <GlassBar>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2">
             <Link href={hasId ? `/sales/invoices/${encodeURIComponent(id)}` : "/sales/invoices"}>
-              <Button variant="outline" className="rounded-2xl bg-white/70 border-slate-200 hover:bg-white">
+              <Button
+                variant="outline"
+                className="rounded-2xl border-slate-200 bg-white/70 hover:bg-white"
+              >
                 <ArrowLeft className="mr-2 size-4" />
                 Back
               </Button>
@@ -238,8 +289,8 @@ export default function InvoicePrintPage() {
 
             <Button
               variant="outline"
-              onClick={load}
-              className="rounded-2xl bg-white/70 border-slate-200 hover:bg-white"
+              onClick={() => void load()}
+              className="rounded-2xl border-slate-200 bg-white/70 hover:bg-white"
               disabled={loading}
             >
               <RefreshCw className={cn("mr-2 size-4", loading && "animate-spin")} />
@@ -250,7 +301,7 @@ export default function InvoicePrintPage() {
           <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="outline"
-              className="rounded-2xl bg-white/70 border-slate-200 hover:bg-white"
+              className="rounded-2xl border-slate-200 bg-white/70 hover:bg-white"
               onClick={() => {
                 setAutoPrint((v) => {
                   const next = !v;
@@ -258,7 +309,6 @@ export default function InvoicePrintPage() {
                   return next;
                 });
               }}
-              title="Auto print after load"
               disabled={!doc}
             >
               <Sparkles className="mr-2 size-4 text-[#ff7a18]" />
@@ -286,17 +336,17 @@ export default function InvoicePrintPage() {
         </div>
       ) : null}
 
-      <div className="mt-3">
+      <div id="ks-print-root" className="mt-3 print:mt-0">
         {doc ? (
           <InvoiceKSDoc data={doc} variant="invoice" />
         ) : (
-          <div className="print:hidden rounded-3xl bg-white ring-1 ring-slate-200 p-6 text-sm text-slate-600 shadow-[0_18px_60px_rgba(2,6,23,0.08)]">
+          <div className="print:hidden rounded-3xl bg-white p-6 text-sm text-slate-600 shadow-[0_18px_60px_rgba(2,6,23,0.08)] ring-1 ring-slate-200">
             {loading ? "Loading invoice…" : hasId ? "No document." : "Missing invoice id."}
           </div>
         )}
       </div>
 
-      <div className="mt-3 print:hidden text-xs text-slate-400">
+      <div className="mt-3 text-xs text-slate-400 print:hidden">
         {invoice ? (
           <>
             Loaded: <span className="font-semibold">{invoice.invoice_no}</span> • Items:{" "}

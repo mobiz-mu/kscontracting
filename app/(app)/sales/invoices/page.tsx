@@ -18,6 +18,12 @@ import {
   BadgeCheck,
   Clock3,
   MoreHorizontal,
+  Wallet,
+  Printer,
+  MessageCircle,
+  Download,
+  Building2,
+  CheckCircle2,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -33,7 +39,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 /* =========================================
-   Types (matches your /api/invoices GET)
+   Types
 ========================================= */
 
 type InvoiceRow = {
@@ -46,6 +52,9 @@ type InvoiceRow = {
   status: string;
   total_amount: number | null;
   balance_amount: number | null;
+  paid_amount?: number | null;
+  subtotal?: number | null;
+  vat_amount?: number | null;
   created_at: string | null;
 };
 
@@ -80,7 +89,10 @@ function n2(v: any) {
 
 function money(v: any) {
   const n = n2(v);
-  return `Rs ${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `Rs ${n.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 function fmtDate(v?: string | null) {
@@ -92,16 +104,6 @@ function fmtDate(v?: string | null) {
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
-}
-
-function isOverdue(balance: number, due?: string | null) {
-  if (!(balance > 0) || !due) return false;
-  const d = new Date(due);
-  if (Number.isNaN(d.getTime())) return false;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  d.setHours(0, 0, 0, 0);
-  return d < today;
 }
 
 function safeId(id: any) {
@@ -150,11 +152,42 @@ function statusTone(st?: string) {
   return "bg-slate-50 text-slate-700 ring-1 ring-slate-200";
 }
 
+function exportCsv(filename: string, head: string[], rows: (string | number)[][]) {
+  const csv =
+    [head, ...rows]
+      .map((row) =>
+        row
+          .map((c) => {
+            const s = String(c ?? "");
+            const needs = s.includes(",") || s.includes('"') || s.includes("\n");
+            return needs ? `"${s.replaceAll('"', '""')}"` : s;
+          })
+          .join(",")
+      )
+      .join("\n") + "\n";
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 /* =========================================
    UI atoms
 ========================================= */
 
-function Chip({ children, className }: { children: React.ReactNode; className?: string }) {
+function Chip({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
     <span
       className={cn(
@@ -168,7 +201,13 @@ function Chip({ children, className }: { children: React.ReactNode; className?: 
   );
 }
 
-function Card3D({ children, className }: { children: React.ReactNode; className?: string }) {
+function Card3D({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
     <div
       className={cn(
@@ -281,18 +320,69 @@ export default function InvoicesPage() {
     }
   }
 
-  // When query/status changes, force page=1 and load once (no double fetch)
   React.useEffect(() => {
     setPage(1);
     void load(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qd, status]);
 
-  // When page changes (from pagination), load that page
   React.useEffect(() => {
     void load(page);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, refreshTick]);
+
+  const totalValue = rows.reduce((s, r) => s + n2(r.total_amount), 0);
+  const totalBalance = rows.reduce((s, r) => s + n2(r.balance_amount), 0);
+  const totalPaid = rows.reduce((s, r) => s + (n2(r.total_amount) - n2(r.balance_amount)), 0);
+
+  function exportCurrentCsv() {
+    const head = [
+      "Invoice No",
+      "Customer",
+      "Invoice Date",
+      "Total",
+      "Balance",
+      "Status",
+    ];
+
+    const body = rows.map((r) => [
+      r.invoice_no,
+      r.customer_name || "—",
+      fmtDate(r.invoice_date),
+      n2(r.total_amount).toFixed(2),
+      n2(r.balance_amount).toFixed(2),
+      r.status || "—",
+    ]);
+
+    exportCsv("invoices-register.csv", head, body);
+  }
+
+  function addPayment(id: string, invoiceNo: string, balance: number) {
+    router.push(
+      `/sales/payments/new?invoiceId=${encodeURIComponent(id)}&invoiceNo=${encodeURIComponent(
+        invoiceNo
+      )}&amount=${encodeURIComponent(String(balance))}`
+    );
+  }
+
+  function sendWhatsApp(id: string, invoiceNo: string, customerName: string | null) {
+    const base =
+      typeof window !== "undefined" ? window.location.origin : "";
+    const printUrl = `${base}/sales/invoices/${encodeURIComponent(id)}/print`;
+
+    const text = [
+      `Dear ${customerName || "Customer"},`,
+      ``,
+      `Please find your invoice ${invoiceNo}.`,
+      `You can view / print it here:`,
+      `${printUrl}`,
+      ``,
+      `KS Contracting Ltd`,
+    ].join("\n");
+
+    const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    window.open(waUrl, "_blank", "noopener,noreferrer");
+  }
 
   return (
     <div className="space-y-4">
@@ -300,25 +390,30 @@ export default function InvoicesPage() {
       <div className="relative overflow-hidden rounded-3xl ring-1 ring-slate-200 bg-white">
         <div className="absolute inset-0 bg-[radial-gradient(900px_460px_at_12%_-20%,rgba(7,27,56,0.14),transparent_60%),radial-gradient(700px_420px_at_110%_-10%,rgba(255,122,24,0.14),transparent_60%),linear-gradient(180deg,rgba(248,250,252,1),rgba(255,255,255,1))]" />
         <div className="relative px-5 py-4 sm:px-7 sm:py-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <Chip>
                   <FileText className="size-3.5 text-slate-500" />
-                  Sales
+                  Sales Ledger
                 </Chip>
                 <Chip className="bg-[#ff7a18]/10 text-[#c25708] ring-[#ff7a18]/20">
                   <BadgeCheck className="size-3.5" />
-                  Invoices
+                  Invoice Control
                 </Chip>
                 <Chip className="bg-slate-900 text-white ring-slate-900/20">
-                  <CircleDollarSign className="size-3.5 text-white/85" />
-                  MUR
+                  <Building2 className="size-3.5 text-white/85" />
+                  KS Contracting
                 </Chip>
               </div>
 
-              <h1 className="mt-2 text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">Invoices</h1>
-              <div className="mt-1 text-sm text-slate-600">Live from Supabase — search, filter, and print.</div>
+              <h1 className="mt-2 text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
+                Invoice Register
+              </h1>
+              <div className="mt-1 text-sm text-slate-600">
+                Ultra-premium enterprise invoice workspace with live figures, collections, payment actions,
+                WhatsApp sharing, printing, and customer visibility.
+              </div>
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -332,6 +427,16 @@ export default function InvoicesPage() {
                 Refresh
               </Button>
 
+              <Button
+                variant="outline"
+                className="rounded-2xl h-11 bg-white/70 shadow-sm hover:bg-white"
+                onClick={exportCurrentCsv}
+                disabled={rows.length === 0}
+              >
+                <Download className="mr-2 size-4" />
+                Export CSV
+              </Button>
+
               <Link href="/sales/invoices/new">
                 <Button className="rounded-2xl h-11 bg-[#071b38] text-white hover:bg-[#06142b] shadow-[0_16px_44px_rgba(7,27,56,0.18)]">
                   <Plus className="mr-2 size-4" />
@@ -342,13 +447,13 @@ export default function InvoicesPage() {
           </div>
 
           {/* Search + Status */}
-          <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto]">
+          <div className="mt-5 grid grid-cols-1 gap-3 xl:grid-cols-[1fr_auto]">
             <div className="relative">
               <Search className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
               <Input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Search invoice no or customer name…"
+                placeholder="Search invoice no, customer name..."
                 className="h-11 rounded-2xl pl-10"
               />
             </div>
@@ -391,42 +496,65 @@ export default function InvoicesPage() {
       </div>
 
       {/* KPI */}
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
         <KPICard
           icon={FileText}
-          label="Total invoices"
+          label="Invoice Count"
           value={String(kpi?.totalInvoices ?? (loading ? "…" : rows.length))}
           sub={`Draft ${drafts} • Issued ${issued} • Paid ${paid}`}
           tone="blue"
         />
-        <KPICard icon={CircleDollarSign} label="Total value" value={money(kpi?.totalValue ?? 0)} sub="All listed invoices" tone="emerald" />
-        <KPICard icon={Clock3} label="Outstanding" value={money(kpi?.totalOutstanding ?? 0)} sub={`Partial ${partial} • Unpaid balance`} tone="orange" />
-        <KPICard icon={AlertTriangle} label="Overdue" value={String(kpi?.overdueCount ?? 0)} sub="Balance due past due date" tone="rose" />
+        <KPICard
+          icon={CircleDollarSign}
+          label="Gross Value"
+          value={money(kpi?.totalValue ?? totalValue)}
+          sub="All invoices in current filter"
+          tone="emerald"
+        />
+        <KPICard
+          icon={Wallet}
+          label="Collected"
+          value={money(totalPaid)}
+          sub={`Partial ${partial}`}
+          tone="blue"
+        />
+        <KPICard
+          icon={AlertTriangle}
+          label="Outstanding"
+          value={money(kpi?.totalOutstanding ?? totalBalance)}
+          sub={`Overdue ${kpi?.overdueCount ?? 0}`}
+          tone={n2(kpi?.totalOutstanding ?? totalBalance) > 0 ? "orange" : "emerald"}
+        />
       </div>
 
-      {/* Table */}
+      {/* Premium table */}
       <Card3D className="p-0">
         <div className="flex items-center justify-between gap-2 px-5 py-4">
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-slate-900">Invoice list</div>
-            <div className="mt-0.5 text-xs text-slate-600">Click a row to open invoice details. Use menu for Print.</div>
+            <div className="text-sm font-semibold text-slate-900">Premium Invoice Table</div>
+            <div className="mt-0.5 text-xs text-slate-600">
+              Customer name visible, due date removed, payment and WhatsApp actions enabled.
+            </div>
           </div>
 
-          <div className="text-xs text-slate-500">{loading ? "Loading…" : `${rows.length} shown • ${totalCount} total`}</div>
+          <div className="text-xs text-slate-500">
+            {loading ? "Loading…" : `${rows.length} shown • ${totalCount} total`}
+          </div>
         </div>
 
         <div className="overflow-hidden rounded-b-3xl border-t border-slate-200">
           <div className="overflow-auto">
-            <table className="w-full min-w-[920px] text-sm">
+            <table className="w-full min-w-[1260px] text-sm">
               <thead className="bg-slate-50 text-slate-600">
                 <tr className="[&>th]:px-5 [&>th]:py-3 [&>th]:text-left [&>th]:font-semibold">
-                  <th className="w-[190px]">Invoice</th>
-                  <th>Customer</th>
-                  <th className="w-[130px]">Invoice Date</th>
-                  <th className="w-[130px]">Due Date</th>
-                  <th className="w-[140px] text-right">Total</th>
-                  <th className="w-[140px] text-right">Balance</th>
-                  <th className="w-[130px]">Status</th>
+                  <th className="w-[200px]">Invoice</th>
+                  <th className="w-[260px]">Customer</th>
+                  <th className="w-[140px]">Invoice Date</th>
+                  <th className="w-[150px] text-right">Total</th>
+                  <th className="w-[150px] text-right">Paid</th>
+                  <th className="w-[150px] text-right">Balance</th>
+                  <th className="w-[140px]">Status</th>
+                  <th className="w-[320px]">Quick Actions</th>
                   <th className="w-[64px] text-right"> </th>
                 </tr>
               </thead>
@@ -435,35 +563,20 @@ export default function InvoicesPage() {
                 {loading ? (
                   Array.from({ length: 8 }).map((_, i) => (
                     <tr key={i} className="animate-pulse">
-                      <td className="px-5 py-4">
-                        <div className="h-4 w-28 rounded bg-slate-200" />
-                      </td>
-                      <td className="px-5 py-4">
-                        <div className="h-4 w-40 rounded bg-slate-200" />
-                      </td>
-                      <td className="px-5 py-4">
-                        <div className="h-4 w-20 rounded bg-slate-200" />
-                      </td>
-                      <td className="px-5 py-4">
-                        <div className="h-4 w-20 rounded bg-slate-200" />
-                      </td>
-                      <td className="px-5 py-4 text-right">
-                        <div className="ml-auto h-4 w-24 rounded bg-slate-200" />
-                      </td>
-                      <td className="px-5 py-4 text-right">
-                        <div className="ml-auto h-4 w-24 rounded bg-slate-200" />
-                      </td>
-                      <td className="px-5 py-4">
-                        <div className="h-6 w-24 rounded-full bg-slate-200" />
-                      </td>
-                      <td className="px-5 py-4 text-right">
-                        <div className="ml-auto h-8 w-8 rounded-2xl bg-slate-200" />
-                      </td>
+                      <td className="px-5 py-4"><div className="h-4 w-28 rounded bg-slate-200" /></td>
+                      <td className="px-5 py-4"><div className="h-4 w-44 rounded bg-slate-200" /></td>
+                      <td className="px-5 py-4"><div className="h-4 w-24 rounded bg-slate-200" /></td>
+                      <td className="px-5 py-4 text-right"><div className="ml-auto h-4 w-24 rounded bg-slate-200" /></td>
+                      <td className="px-5 py-4 text-right"><div className="ml-auto h-4 w-24 rounded bg-slate-200" /></td>
+                      <td className="px-5 py-4 text-right"><div className="ml-auto h-4 w-24 rounded bg-slate-200" /></td>
+                      <td className="px-5 py-4"><div className="h-6 w-24 rounded-full bg-slate-200" /></td>
+                      <td className="px-5 py-4"><div className="h-9 w-64 rounded-2xl bg-slate-200" /></td>
+                      <td className="px-5 py-4 text-right"><div className="ml-auto h-9 w-9 rounded-2xl bg-slate-200" /></td>
                     </tr>
                   ))
                 ) : rows.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-5 py-12 text-center text-slate-500">
+                    <td colSpan={9} className="px-5 py-12 text-center text-slate-500">
                       No invoices found.
                       <div className="mt-3">
                         <Link href="/sales/invoices/new">
@@ -480,7 +593,10 @@ export default function InvoicesPage() {
                     const id = safeId(r.id);
                     const total = n2(r.total_amount);
                     const bal = n2(r.balance_amount);
-                    const overdue = isOverdue(bal, r.due_date);
+                    const paidAmt =
+                      typeof r.paid_amount === "number" && Number.isFinite(r.paid_amount)
+                        ? n2(r.paid_amount)
+                        : Math.max(0, total - bal);
 
                     const href = id ? `/sales/invoices/${encodeURIComponent(id)}` : "";
 
@@ -496,10 +612,7 @@ export default function InvoicesPage() {
                         onKeyDown={(e) => {
                           if (e.key === "Enter" && href) router.push(href);
                         }}
-                        className={cn(
-                          "group transition hover:bg-slate-50/70 cursor-pointer",
-                          overdue && "bg-rose-50/40"
-                        )}
+                        className="group transition hover:bg-slate-50/70 cursor-pointer"
                       >
                         <td className="px-5 py-4">
                           {href ? (
@@ -514,7 +627,9 @@ export default function InvoicesPage() {
                           ) : (
                             <div className="font-extrabold text-slate-900">{r.invoice_no}</div>
                           )}
-                          <div className="mt-1 text-xs text-slate-500">{r.created_at ? `Created ${fmtDate(r.created_at)}` : "—"}</div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            {r.created_at ? `Created ${fmtDate(r.created_at)}` : "—"}
+                          </div>
                         </td>
 
                         <td className="px-5 py-4">
@@ -529,17 +644,18 @@ export default function InvoicesPage() {
                           </div>
                         </td>
 
-                        <td className="px-5 py-4">
-                          <div className={cn("inline-flex items-center gap-2", overdue ? "text-rose-700" : "text-slate-700")}>
-                            <Calendar className={cn("size-4", overdue ? "text-rose-400" : "text-slate-400")} />
-                            {fmtDate(r.due_date)}
-                          </div>
-                          {overdue ? <div className="mt-1 text-xs font-semibold text-rose-700">Overdue</div> : null}
+                        <td className="px-5 py-4 text-right font-extrabold text-slate-900">
+                          {money(total)}
                         </td>
 
-                        <td className="px-5 py-4 text-right font-extrabold text-slate-900">{money(total)}</td>
+                        <td className="px-5 py-4 text-right font-semibold text-emerald-700">
+                          {money(paidAmt)}
+                        </td>
 
-                        <td className={cn("px-5 py-4 text-right font-extrabold", bal > 0 ? "text-slate-900" : "text-emerald-700")}>
+                        <td className={cn(
+                          "px-5 py-4 text-right font-extrabold",
+                          bal > 0 ? "text-slate-900" : "text-emerald-700"
+                        )}>
                           {money(bal)}
                         </td>
 
@@ -547,6 +663,58 @@ export default function InvoicesPage() {
                           <span className={cn("inline-flex rounded-full px-3 py-1 text-xs font-semibold", statusTone(r.status))}>
                             {String(r.status || "").replaceAll("_", " ") || "—"}
                           </span>
+                        </td>
+
+                        <td className="px-5 py-4" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex flex-wrap gap-2">
+                            <Link href={href || "#"} aria-disabled={!href}>
+                              <Button variant="outline" className="h-9 rounded-xl">
+                                Open
+                              </Button>
+                            </Link>
+
+                            <Button
+                              variant="outline"
+                              className="h-9 rounded-xl"
+                              onClick={() => {
+                                if (!id) return;
+                                window.open(
+                                  `/sales/invoices/${encodeURIComponent(id)}/print`,
+                                  "_blank",
+                                  "noopener,noreferrer"
+                                );
+                              }}
+                              disabled={!id}
+                            >
+                              <Printer className="mr-2 size-4" />
+                              Print
+                            </Button>
+
+                            <Button
+                              className="h-9 rounded-xl bg-[#071b38] text-white hover:bg-[#06142b]"
+                              onClick={() => {
+                                if (!id) return;
+                                addPayment(id, r.invoice_no, bal);
+                              }}
+                              disabled={!id}
+                            >
+                              <Wallet className="mr-2 size-4" />
+                              Add Payment
+                            </Button>
+
+                            <Button
+                              variant="outline"
+                              className="h-9 rounded-xl"
+                              onClick={() => {
+                                if (!id) return;
+                                sendWhatsApp(id, r.invoice_no, r.customer_name);
+                              }}
+                              disabled={!id}
+                            >
+                              <MessageCircle className="mr-2 size-4" />
+                              WhatsApp
+                            </Button>
+                          </div>
                         </td>
 
                         <td className="px-5 py-4 text-right" onClick={(e) => e.stopPropagation()}>
@@ -569,16 +737,40 @@ export default function InvoicesPage() {
                                 disabled={!id}
                                 onClick={() => {
                                   if (!id) return;
-                                  window.open(`/sales/invoices/${encodeURIComponent(id)}/print`, "_blank", "noopener,noreferrer");
+                                  window.open(
+                                    `/sales/invoices/${encodeURIComponent(id)}/print`,
+                                    "_blank",
+                                    "noopener,noreferrer"
+                                  );
                                 }}
                               >
                                 Print / Save PDF
                               </DropdownMenuItem>
 
+                              <DropdownMenuItem
+                                disabled={!id}
+                                onClick={() => {
+                                  if (!id) return;
+                                  addPayment(id, r.invoice_no, bal);
+                                }}
+                              >
+                                Add payment
+                              </DropdownMenuItem>
+
+                              <DropdownMenuItem
+                                disabled={!id}
+                                onClick={() => {
+                                  if (!id) return;
+                                  sendWhatsApp(id, r.invoice_no, r.customer_name);
+                                }}
+                              >
+                                Send to WhatsApp
+                              </DropdownMenuItem>
+
                               <DropdownMenuSeparator />
 
-                              <DropdownMenuItem disabled title="Enable when payment route exists">
-                                Manage payments (coming)
+                              <DropdownMenuItem disabled>
+                                Email send (next)
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>

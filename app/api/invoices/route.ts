@@ -21,19 +21,16 @@ function n2(v: any) {
   return Number.isFinite(x) ? x : 0;
 }
 
-function clamp(n: number, a: number, b: number) {
-  return Math.max(a, Math.min(b, n));
-}
-
 /**
  * Body from UI:
  * {
  *   id?: string,
  *   status?: "DRAFT" | "ISSUED",
- *   invoice_date, due_date,
- *   customer_id,
- *   vat_rate,
- *   notes?,
+ *   invoice_type?: "VAT_INVOICE" | "PRO_FORMA",
+ *   invoice_date: string,
+ *   customer_id: number,
+ *   site_address?: string,
+ *   notes?: string,
  *   rows: [{ description, qty, price }]
  * }
  */
@@ -41,32 +38,13 @@ export async function POST(req: Request) {
   try {
     const supabase = await createSupabaseServerClient();
     const { data: userRes, error: uErr } = await supabase.auth.getUser();
+
     if (uErr || !userRes.user) {
       return jsonError(401, { error: "Unauthorized", supabaseError: safeError(uErr) });
     }
 
     const body = await req.json().catch(() => ({}));
     const admin = createSupabaseAdminClient();
-
-   let query = admin
-  .from("invoices")
-  .select(
-    `
-    id,
-    invoice_no,
-    customer_id,
-    invoice_date,
-    due_date,
-    status,
-    total_amount,
-    balance_amount,
-    created_at,
-    customers:customer_id ( name )
-  `,
-    { count: "exact" }
-  )
-  .eq("created_by", userRes.user.id) // ✅ IMPORTANT
-  .order("created_at", { ascending: false });
 
     // -----------------------------
     // Validate + normalize
@@ -79,32 +57,39 @@ export async function POST(req: Request) {
     }
 
     const invoice_date = String(body.invoice_date ?? "").trim();
-    if (!invoice_date) return jsonError(400, { error: "invoice_date is required (yyyy-mm-dd)" });
+    if (!invoice_date) {
+      return jsonError(400, { error: "invoice_date is required (yyyy-mm-dd)" });
+    }
 
-    const due_date = String(body.due_date ?? "").trim() || null;
+    const invoice_type =
+      String(body.invoice_type ?? "VAT_INVOICE").toUpperCase() === "PRO_FORMA"
+        ? "PRO_FORMA"
+        : "VAT_INVOICE";
+
     const status = String(body.status ?? "DRAFT").toUpperCase();
     const notes = typeof body.notes === "string" ? body.notes : null;
+    const site_address = typeof body.site_address === "string" ? body.site_address.trim() : null;
 
-    // VAT rate: allow 0..1 (eg 0.15). If UI sends 15, normalize to 0.15.
-    let vat_rate = n2(body.vat_rate);
-    if (vat_rate > 1) vat_rate = vat_rate / 100;
-    vat_rate = clamp(vat_rate || 0, 0, 1);
+    // KS rule: VAT is fixed at 15%
+    const vat_rate = 0.15;
 
     const rows = Array.isArray(body.rows) ? body.rows : [];
     const cleanRows = rows
       .map((r: any) => ({
         description: String(r.description ?? "").trim(),
         qty: n2(r.qty),
-        unit_price_excl_vat: n2(r.price), // UI uses price
+        unit_price_excl_vat: n2(r.price),
       }))
       .filter((r: any) => r.description.length > 0 && r.qty > 0);
 
     if (cleanRows.length === 0) {
-      return jsonError(400, { error: "At least one invoice item (description + qty) is required." });
+      return jsonError(400, {
+        error: "At least one invoice item (description + qty) is required.",
+      });
     }
 
     // -----------------------------
-    // ✅ ALWAYS compute totals server-side
+    // Always compute totals server-side
     // -----------------------------
     const computedSubtotal = cleanRows.reduce(
       (s: number, r: any) => s + n2(r.qty) * n2(r.unit_price_excl_vat),
@@ -114,10 +99,10 @@ export async function POST(req: Request) {
     const computedTotal = computedSubtotal + computedVat;
 
     const paid_amount = n2(body.paid_amount ?? 0);
-    const balance_amount = clamp(n2(body.balance_amount ?? (computedTotal - paid_amount)), 0, computedTotal);
+    const balance_amount = Math.max(0, computedTotal - paid_amount);
 
     // -----------------------------
-    // Upsert Invoice
+    // Create or update invoice
     // -----------------------------
     let savedInvoice: any = null;
 
@@ -126,8 +111,9 @@ export async function POST(req: Request) {
         .from("invoices")
         .insert({
           customer_id: customerIdNum,
+          invoice_type,
           invoice_date,
-          due_date,
+          site_address,
           status,
           notes,
           subtotal: computedSubtotal,
@@ -135,22 +121,44 @@ export async function POST(req: Request) {
           total_amount: computedTotal,
           paid_amount,
           balance_amount,
-          created_by: userRes.user.id, // uuid NOT NULL
+          created_by: userRes.user.id,
         })
         .select(
-          "id, invoice_no, status, invoice_date, due_date, customer_id, subtotal, vat_amount, total_amount, paid_amount, balance_amount, created_at"
+          `
+          id,
+          invoice_no,
+          customer_id,
+          invoice_type,
+          invoice_date,
+          site_address,
+          status,
+          notes,
+          subtotal,
+          vat_amount,
+          total_amount,
+          paid_amount,
+          balance_amount,
+          created_at
+        `
         )
         .single();
 
-      if (error) return jsonError(500, { error: "Failed to create invoice", supabaseError: safeError(error) });
+      if (error) {
+        return jsonError(500, {
+          error: "Failed to create invoice",
+          supabaseError: safeError(error),
+        });
+      }
+
       savedInvoice = data;
     } else {
       const { data, error } = await admin
         .from("invoices")
         .update({
           customer_id: customerIdNum,
+          invoice_type,
           invoice_date,
-          due_date,
+          site_address,
           status,
           notes,
           subtotal: computedSubtotal,
@@ -160,21 +168,44 @@ export async function POST(req: Request) {
           balance_amount,
         })
         .eq("id", invoiceId)
+        .eq("created_by", userRes.user.id)
         .select(
-          "id, invoice_no, status, invoice_date, due_date, customer_id, subtotal, vat_amount, total_amount, paid_amount, balance_amount, created_at"
+          `
+          id,
+          invoice_no,
+          customer_id,
+          invoice_type,
+          invoice_date,
+          site_address,
+          status,
+          notes,
+          subtotal,
+          vat_amount,
+          total_amount,
+          paid_amount,
+          balance_amount,
+          created_at
+        `
         )
         .single();
 
-      if (error) return jsonError(500, { error: "Failed to update invoice", supabaseError: safeError(error) });
+      if (error) {
+        return jsonError(500, {
+          error: "Failed to update invoice",
+          supabaseError: safeError(error),
+        });
+      }
+
       savedInvoice = data;
     }
 
     const savedId = String(savedInvoice.id);
 
     // -----------------------------
-    // Replace invoice_items (idempotent)
+    // Replace invoice_items
     // -----------------------------
     const { error: delErr } = await admin.from("invoice_items").delete().eq("invoice_id", savedId);
+
     if (delErr) {
       return jsonError(500, {
         error: "Invoice saved but failed to clear existing items",
@@ -213,7 +244,6 @@ export async function POST(req: Request) {
       });
     }
 
-    // ✅ Return totals that match inserted items
     return NextResponse.json({
       ok: true,
       data: {
@@ -231,6 +261,7 @@ export async function GET(req: Request) {
   try {
     const supabase = await createSupabaseServerClient();
     const { data: userRes, error: uErr } = await supabase.auth.getUser();
+
     if (uErr || !userRes.user) {
       return jsonError(401, { error: "Unauthorized", supabaseError: safeError(uErr) });
     }
@@ -251,9 +282,11 @@ export async function GET(req: Request) {
         id,
         invoice_no,
         customer_id,
+        invoice_type,
         invoice_date,
-        due_date,
+        site_address,
         status,
+        notes,
         subtotal,
         vat_amount,
         total_amount,
@@ -264,6 +297,7 @@ export async function GET(req: Request) {
       `,
         { count: "exact" }
       )
+      .eq("created_by", userRes.user.id)
       .order("created_at", { ascending: false });
 
     if (status !== "ALL") query = query.eq("status", status);
@@ -276,7 +310,10 @@ export async function GET(req: Request) {
 
     if (error) {
       console.error("[GET /api/invoices] supabase error", error);
-      return jsonError(500, { error: "Supabase query failed", supabaseError: safeError(error) });
+      return jsonError(500, {
+        error: "Supabase query failed",
+        supabaseError: safeError(error),
+      });
     }
 
     const rows =
@@ -285,9 +322,11 @@ export async function GET(req: Request) {
         invoice_no: r.invoice_no,
         customer_id: r.customer_id,
         customer_name: r.customers?.name ?? null,
+        invoice_type: r.invoice_type ?? "VAT_INVOICE",
         invoice_date: r.invoice_date ?? null,
-        due_date: r.due_date ?? null,
+        site_address: r.site_address ?? null,
         status: r.status,
+        notes: r.notes ?? null,
         subtotal: r.subtotal,
         vat_amount: r.vat_amount,
         total_amount: r.total_amount,

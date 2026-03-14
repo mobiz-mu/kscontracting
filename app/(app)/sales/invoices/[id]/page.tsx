@@ -1,4 +1,3 @@
-// app/(app)/sales/invoices/[id]/page.tsx
 "use client";
 
 import * as React from "react";
@@ -11,13 +10,14 @@ import {
   Send,
   Calendar,
   Building2,
-  Mail,
-  Phone,
   Hash,
   FileText,
   CreditCard,
-  AlertTriangle,
   CheckCircle2,
+  MessageCircle,
+  Mail,
+  MapPin,
+  Percent,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -25,7 +25,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 /* =========================
-   Types (matches /api/invoices/[id])
+   Types
 ========================= */
 
 type ApiCustomer = {
@@ -33,8 +33,6 @@ type ApiCustomer = {
   name?: string | null;
   brn?: string | null;
   vat_no?: string | null;
-  email?: string | null;
-  phone?: string | null;
   address?: string | null;
 } | null;
 
@@ -42,8 +40,8 @@ type ApiInvoice = {
   id: string;
   invoice_no: string;
   status?: string | null;
+  invoice_type?: "VAT_INVOICE" | "PRO_FORMA" | string | null;
   invoice_date?: string | null;
-  due_date?: string | null;
   notes?: string | null;
   subtotal?: number | null;
   vat_amount?: number | null;
@@ -52,7 +50,8 @@ type ApiInvoice = {
   balance_amount?: number | null;
   created_at?: string | null;
   issued_at?: string | null;
-  customers?: ApiCustomer; // embedded by your /api/invoices/[id]
+  site_address?: string | null;
+  customers?: ApiCustomer;
 };
 
 type ApiItem = {
@@ -92,7 +91,10 @@ function n2(v: any) {
 
 function money(v: any) {
   const n = n2(v);
-  return `Rs ${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `Rs ${n.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 function fmtDate(v?: string | null) {
@@ -104,16 +106,6 @@ function fmtDate(v?: string | null) {
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
-}
-
-function isOverdue(balance: number, due?: string | null) {
-  if (!(balance > 0) || !due) return false;
-  const d = new Date(due);
-  if (Number.isNaN(d.getTime())) return false;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  d.setHours(0, 0, 0, 0);
-  return d < today;
 }
 
 function getParamId(p: any): string {
@@ -130,6 +122,10 @@ function statusStyle(s?: string | null) {
   if (key === "VOID") return "bg-rose-50 text-rose-700 border-rose-200";
   if (key === "DRAFT") return "bg-slate-100 text-slate-700 border-slate-200";
   return "bg-slate-50 text-slate-700 border-slate-200";
+}
+
+function invoiceTypeLabel(v?: string | null) {
+  return String(v).toUpperCase() === "PRO_FORMA" ? "PRO FORMA INVOICE" : "VAT INVOICE";
 }
 
 async function safeJson<T>(res: Response): Promise<T> {
@@ -178,22 +174,31 @@ function StatBox({
 }: {
   label: string;
   value: string;
-  tone?: "slate" | "navy" | "orange" | "emerald" | "rose";
+  tone?: "slate" | "navy" | "orange" | "emerald";
 }) {
   const tones: Record<string, string> = {
     slate: "bg-slate-50 ring-slate-200 text-slate-900",
     navy: "bg-[#071b38] text-white ring-white/10",
     orange: "bg-[#ff7a18] text-white ring-white/10",
     emerald: "bg-emerald-50 ring-emerald-200 text-emerald-900",
-    rose: "bg-rose-50 ring-rose-200 text-rose-900",
   };
 
   return (
     <div className={cn("rounded-2xl p-4 ring-1", tones[tone])}>
-      <div className={cn("text-xs font-semibold", tone === "navy" || tone === "orange" ? "text-white/70" : "text-slate-500")}>
+      <div
+        className={cn(
+          "text-xs font-semibold",
+          tone === "navy" || tone === "orange" ? "text-white/70" : "text-slate-500"
+        )}
+      >
         {label}
       </div>
-      <div className={cn("mt-1 text-lg font-extrabold tracking-tight", tone === "navy" || tone === "orange" ? "text-white" : "text-slate-900")}>
+      <div
+        className={cn(
+          "mt-1 text-lg font-extrabold tracking-tight",
+          tone === "navy" || tone === "orange" ? "text-white" : "text-slate-900"
+        )}
+      >
         {value}
       </div>
     </div>
@@ -208,7 +213,6 @@ export default function InvoiceDetailsPage() {
   const params = useParams();
   const router = useRouter();
 
-  // ✅ ALWAYS derive id safely (handles string[] too)
   const id = React.useMemo(() => getParamId(params), [params]);
   const hasId = !!id && id !== "undefined" && id !== "null";
 
@@ -269,8 +273,6 @@ export default function InvoiceDetailsPage() {
       if (!j.ok) throw new Error(j?.error?.message ?? j?.error ?? "Issue failed");
 
       await load();
-
-      // open print after issue
       window.open(`/sales/invoices/${id}/print`, "_blank", "noopener,noreferrer");
     } catch (e: any) {
       setErr(e?.message || "Failed to issue invoice");
@@ -284,17 +286,35 @@ export default function InvoiceDetailsPage() {
   const vat = n2(invoice?.vat_amount);
   const balance = n2(invoice?.balance_amount);
 
-  // ✅ do NOT use "||" because 0 is valid
   const paid =
     typeof invoice?.paid_amount === "number" && Number.isFinite(invoice.paid_amount)
       ? n2(invoice.paid_amount)
       : Math.max(0, total - balance);
 
-  const overdue = isOverdue(balance, invoice?.due_date ?? null);
   const statusKey = String(invoice?.status ?? "").toUpperCase();
   const canIssue = !!invoice && statusKey === "DRAFT";
 
   const cust = invoice?.customers ?? null;
+  const invoiceType = invoiceTypeLabel(invoice?.invoice_type);
+
+  const printUrl = hasId ? `${window.location.origin}/sales/invoices/${id}/print` : "";
+  const whatsappText = invoice
+    ? `Hello,\n\nPlease find your ${invoiceType} from KS Contracting Ltd.\nInvoice No: ${invoice.invoice_no}\nAmount: ${money(total)}\n\nView invoice:\n${printUrl}`
+    : "";
+
+  const whatsappUrl = invoice
+    ? `https://wa.me/23059416756?text=${encodeURIComponent(whatsappText)}`
+    : "#";
+
+  const emailSubject = invoice
+    ? `${invoiceType} - ${invoice.invoice_no} - KS Contracting Ltd`
+    : "KS Contracting Invoice";
+
+  const emailBody = invoice
+    ? `Hello,%0D%0A%0D%0APlease find your ${invoiceType} from KS Contracting Ltd.%0D%0AInvoice No: ${invoice.invoice_no}%0D%0AAmount: ${encodeURIComponent(
+        money(total)
+      )}%0D%0A%0D%0AView invoice:%0D%0A${encodeURIComponent(printUrl)}%0D%0A%0D%0AThank you.`
+    : "";
 
   return (
     <div className="space-y-4">
@@ -329,10 +349,10 @@ export default function InvoiceDetailsPage() {
                   </span>
                 )}
 
-                {overdue ? (
-                  <span className="inline-flex items-center gap-2 rounded-full bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 ring-1 ring-rose-200">
-                    <AlertTriangle className="size-4" />
-                    Overdue
+                {invoice ? (
+                  <span className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
+                    <FileText className="size-3.5 text-slate-500" />
+                    {invoiceType}
                   </span>
                 ) : null}
 
@@ -361,13 +381,25 @@ export default function InvoiceDetailsPage() {
               <div className="mt-1 text-sm text-slate-600 flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span className="inline-flex items-center gap-2">
                   <Calendar className="size-4 text-slate-400" />
-                  Invoice: <span className="font-semibold text-slate-900">{fmtDate(invoice?.invoice_date ?? null)}</span>
+                  Date: <span className="font-semibold text-slate-900">{fmtDate(invoice?.invoice_date ?? null)}</span>
                 </span>
+
                 <span className="text-slate-300">•</span>
-                <span className={cn("inline-flex items-center gap-2", overdue && "text-rose-700")}>
-                  <Calendar className={cn("size-4", overdue ? "text-rose-400" : "text-slate-400")} />
-                  Due: <span className="font-semibold">{fmtDate(invoice?.due_date ?? null)}</span>
+
+                <span className="inline-flex items-center gap-2">
+                  <Percent className="size-4 text-slate-400" />
+                  VAT: <span className="font-semibold text-slate-900">15%</span>
                 </span>
+
+                {invoice?.site_address ? (
+                  <>
+                    <span className="text-slate-300">•</span>
+                    <span className="inline-flex items-center gap-2">
+                      <MapPin className="size-4 text-slate-400" />
+                      Site: <span className="font-semibold text-slate-900">{invoice.site_address}</span>
+                    </span>
+                  </>
+                ) : null}
               </div>
             </div>
 
@@ -407,7 +439,7 @@ export default function InvoiceDetailsPage() {
 
           {!hasId ? (
             <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-              Missing invoice id in URL. Open from the invoices list (click invoice number).
+              Missing invoice id in URL. Open from the invoices list.
             </div>
           ) : err ? (
             <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -419,17 +451,16 @@ export default function InvoiceDetailsPage() {
 
       {/* KPI row */}
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <StatBox label="Subtotal" value={invoice ? money(subtotal) : "—"} />
-        <StatBox label="VAT" value={invoice ? money(vat) : "—"} />
-        <StatBox label="Total" value={invoice ? money(total) : "—"} tone="navy" />
-        <StatBox label="Balance" value={invoice ? money(balance) : "—"} tone={overdue ? "rose" : "orange"} />
+        <StatBox label="Sub Total" value={invoice ? money(subtotal) : "—"} />
+        <StatBox label="VAT 15%" value={invoice ? money(vat) : "—"} />
+        <StatBox label="TOTAL" value={invoice ? money(total) : "—"} tone="navy" />
+        <StatBox label="Balance" value={invoice ? money(balance) : "—"} tone={balance <= 0 ? "emerald" : "orange"} />
       </div>
 
       {/* Content */}
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_380px] items-start">
         {/* LEFT */}
         <div className="space-y-4">
-          {/* Items */}
           <Card3D className="p-0">
             <div className="flex items-center justify-between px-5 py-4">
               <div className="min-w-0">
@@ -446,14 +477,14 @@ export default function InvoiceDetailsPage() {
             </div>
 
             <div className="border-t border-slate-200 overflow-auto">
-              <table className="w-full min-w-[820px] text-sm">
+              <table className="w-full min-w-[760px] text-sm">
                 <thead className="bg-slate-50 text-slate-600">
                   <tr className="[&>th]:px-5 [&>th]:py-3 [&>th]:text-left [&>th]:font-semibold">
                     <th>Description</th>
                     <th className="w-[110px] text-right">Qty</th>
-                    <th className="w-[160px] text-right">Unit (excl.)</th>
+                    <th className="w-[160px] text-right">Unit Price</th>
                     <th className="w-[140px] text-right">VAT</th>
-                    <th className="w-[170px] text-right">Line Total</th>
+                    <th className="w-[170px] text-right">Amount</th>
                   </tr>
                 </thead>
 
@@ -494,12 +525,20 @@ export default function InvoiceDetailsPage() {
                     items.map((it) => (
                       <tr key={String(it.id)}>
                         <td className="px-5 py-4">
-                          <div className="font-semibold text-slate-900">{it.description}</div>
+                          <div className="font-semibold text-slate-900 whitespace-pre-wrap break-words">
+                            {it.description}
+                          </div>
                         </td>
                         <td className="px-5 py-4 text-right font-semibold text-slate-700">{n2(it.qty)}</td>
-                        <td className="px-5 py-4 text-right font-semibold text-slate-900">{money(it.unit_price_excl_vat)}</td>
-                        <td className="px-5 py-4 text-right font-semibold text-slate-900">{money(it.vat_amount)}</td>
-                        <td className="px-5 py-4 text-right font-extrabold text-slate-900">{money(it.line_total)}</td>
+                        <td className="px-5 py-4 text-right font-semibold text-slate-900">
+                          {money(it.unit_price_excl_vat)}
+                        </td>
+                        <td className="px-5 py-4 text-right font-semibold text-slate-900">
+                          {money(it.vat_amount)}
+                        </td>
+                        <td className="px-5 py-4 text-right font-extrabold text-slate-900">
+                          {money(it.line_total)}
+                        </td>
                       </tr>
                     ))
                   )}
@@ -507,7 +546,6 @@ export default function InvoiceDetailsPage() {
               </table>
             </div>
 
-            {/* Totals footer */}
             <div className="border-t border-slate-200 bg-white px-5 py-4">
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <div className="text-xs text-slate-600">
@@ -516,22 +554,22 @@ export default function InvoiceDetailsPage() {
                       <span className="font-semibold text-slate-900">Notes:</span> {invoice.notes.trim()}
                     </>
                   ) : (
-                    <span className="text-slate-500">Tip: add notes (bank details / reference instructions) to show on print.</span>
+                    <span className="text-slate-500">Bank details / payment note will appear here.</span>
                   )}
                 </div>
 
                 <div className="ml-auto w-full max-w-[360px] space-y-2">
                   <div className="flex items-center justify-between text-xs text-slate-600">
-                    <span>Subtotal</span>
+                    <span>Sub Total</span>
                     <span className="font-semibold text-slate-900">{money(subtotal)}</span>
                   </div>
                   <div className="flex items-center justify-between text-xs text-slate-600">
-                    <span>VAT</span>
+                    <span>VAT 15%</span>
                     <span className="font-semibold text-slate-900">{money(vat)}</span>
                   </div>
                   <div className="h-px bg-slate-200" />
                   <div className="flex items-center justify-between text-sm">
-                    <span className="font-semibold text-slate-700">Total</span>
+                    <span className="font-semibold text-slate-700">TOTAL</span>
                     <span className="font-extrabold text-slate-900">{money(total)}</span>
                   </div>
                   <div className="flex items-center justify-between text-xs text-slate-600">
@@ -556,55 +594,55 @@ export default function InvoiceDetailsPage() {
           <Card3D className="p-5">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-sm font-semibold text-slate-900">Bill To</div>
-                <div className="mt-0.5 text-xs text-slate-600">Customer details (from invoice.customers)</div>
+                <div className="text-sm font-semibold text-slate-900">Client Details</div>
+                <div className="mt-0.5 text-xs text-slate-600">KS invoice customer information</div>
               </div>
               <div className="grid size-10 place-items-center rounded-2xl bg-slate-50 ring-1 ring-slate-200">
                 <Building2 className="size-4 text-slate-500" />
               </div>
             </div>
 
-            <div className="mt-4 space-y-2">
+            <div className="mt-4 space-y-3">
               <div className="text-sm font-extrabold text-slate-900">{cust?.name ?? "—"}</div>
 
-              {cust?.address ? <div className="text-sm text-slate-600">{cust.address}</div> : <div className="text-sm text-slate-500">No address</div>}
+              {cust?.address ? (
+                <div className="text-sm text-slate-600">{cust.address}</div>
+              ) : (
+                <div className="text-sm text-slate-500">No customer address</div>
+              )}
 
-              <div className="mt-2 grid gap-2">
-                {cust?.email ? (
-                  <div className="inline-flex items-center gap-2 text-sm text-slate-700">
-                    <Mail className="size-4 text-slate-400" />
-                    <span className="font-semibold">{cust.email}</span>
-                  </div>
-                ) : null}
+              {invoice?.site_address ? (
+                <div className="inline-flex items-center gap-2 text-sm text-slate-700">
+                  <MapPin className="size-4 text-slate-400" />
+                  <span>
+                    Site Address: <span className="font-semibold">{invoice.site_address}</span>
+                  </span>
+                </div>
+              ) : null}
 
-                {cust?.phone ? (
-                  <div className="inline-flex items-center gap-2 text-sm text-slate-700">
-                    <Phone className="size-4 text-slate-400" />
-                    <span className="font-semibold">{cust.phone}</span>
-                  </div>
-                ) : null}
+              {cust?.vat_no || cust?.brn ? (
+                <div className="grid gap-2 text-xs text-slate-600">
+                  {cust?.vat_no ? (
+                    <div className="inline-flex items-center gap-2">
+                      <Percent className="size-4 text-slate-400" />
+                      <span>
+                        Client VAT Reg. No.: <span className="font-semibold text-slate-900">{cust.vat_no}</span>
+                      </span>
+                    </div>
+                  ) : null}
 
-                {cust?.vat_no || cust?.brn ? (
-                  <div className="inline-flex items-center gap-2 text-xs text-slate-600">
-                    <Hash className="size-4 text-slate-400" />
-                    <span>
-                      {cust?.vat_no ? (
-                        <>
-                          VAT: <span className="font-semibold text-slate-900">{cust.vat_no}</span>
-                        </>
-                      ) : null}
-                      {cust?.vat_no && cust?.brn ? <span className="mx-2 text-slate-300">•</span> : null}
-                      {cust?.brn ? (
-                        <>
-                          BRN: <span className="font-semibold text-slate-900">{cust.brn}</span>
-                        </>
-                      ) : null}
-                    </span>
-                  </div>
-                ) : (
-                  <div className="text-xs text-slate-500">No VAT/BRN</div>
-                )}
-              </div>
+                  {cust?.brn ? (
+                    <div className="inline-flex items-center gap-2">
+                      <Hash className="size-4 text-slate-400" />
+                      <span>
+                        Client BRN No.: <span className="font-semibold text-slate-900">{cust.brn}</span>
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="text-xs text-slate-500">No VAT/BRN</div>
+              )}
             </div>
           </Card3D>
 
@@ -613,7 +651,7 @@ export default function InvoiceDetailsPage() {
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="text-sm font-semibold text-slate-900">Actions</div>
-                <div className="mt-0.5 text-xs text-slate-600">Print, issue, and manage state.</div>
+                <div className="mt-0.5 text-xs text-slate-600">Print, WhatsApp, email, issue.</div>
               </div>
               {invoice?.status ? (
                 <Badge variant="secondary" className={cn("rounded-full border", statusStyle(invoice.status))}>
@@ -642,6 +680,30 @@ export default function InvoiceDetailsPage() {
                 {issuing ? <RefreshCw className="mr-2 size-4 animate-spin" /> : <Send className="mr-2 size-4" />}
                 Issue Invoice
               </Button>
+
+              <a href={whatsappUrl} target="_blank" rel="noreferrer">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
+                  disabled={!invoice || !hasId}
+                >
+                  <MessageCircle className="mr-2 size-4" />
+                  Send by WhatsApp
+                </Button>
+              </a>
+
+              <a href={invoice ? `mailto:?subject=${encodeURIComponent(emailSubject)}&body=${emailBody}` : "#"}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
+                  disabled={!invoice || !hasId}
+                >
+                  <Mail className="mr-2 size-4" />
+                  Send by Email
+                </Button>
+              </a>
 
               <Button
                 variant="outline"
@@ -681,21 +743,12 @@ export default function InvoiceDetailsPage() {
                 </div>
                 <div className="flex items-center justify-between">
                   <span>Balance</span>
-                  <span className={cn("font-extrabold", overdue ? "text-rose-700" : "text-slate-900")}>
+                  <span className={cn("font-extrabold", balance > 0 ? "text-slate-900" : "text-emerald-700")}>
                     {invoice ? money(balance) : "—"}
                   </span>
                 </div>
               </div>
             </div>
-
-            {overdue ? (
-              <div className="mt-3 rounded-2xl bg-rose-50 p-3 ring-1 ring-rose-200">
-                <div className="flex items-center gap-2 text-xs font-semibold text-rose-700">
-                  <AlertTriangle className="size-4" />
-                  Overdue — consider sending a reminder today.
-                </div>
-              </div>
-            ) : null}
           </Card3D>
         </div>
       </div>

@@ -1,8 +1,8 @@
-// app/(app)/sales/quotations/page.tsx
 "use client";
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowUpRight,
   FileText,
@@ -18,13 +18,18 @@ import {
   BadgeCheck,
   Clock3,
   Sparkles,
+  MoreHorizontal,
+  Download,
+  Printer,
+  MessageCircle,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
-// Optional (shadcn). If you don't have these, remove imports + menu usage below.
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,14 +39,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 /* =========================================
-   Types (matches /api/quotations GET)
-   Expected response:
-   {
-     ok: true,
-     data: [{ id, quote_no, customer_id, customer_name, quote_date, valid_until, status, total_amount, created_at }],
-     meta?: { page, pageSize, total, hasMore },
-     kpi?: { totalQuotes, totalValue, pendingCount, acceptedCount, expiredCount, byStatus }
-   }
+   Types
 ========================================= */
 
 type QuoteRow = {
@@ -51,8 +49,10 @@ type QuoteRow = {
   customer_name: string | null;
   quote_date: string | null;
   valid_until: string | null;
-  status: string; // "DRAFT" | "SENT" | "ACCEPTED" | "REJECTED" | "EXPIRED" | ...
+  status: string;
   total_amount: number | null;
+  subtotal?: number | null;
+  vat_amount?: number | null;
   created_at: string | null;
 };
 
@@ -68,7 +68,7 @@ type QuotesResponse = {
   kpi?: {
     totalQuotes: number;
     totalValue: number;
-    pendingCount: number; // SENT + DRAFT (optional)
+    pendingCount: number;
     acceptedCount: number;
     expiredCount: number;
     byStatus: Record<string, number>;
@@ -88,7 +88,10 @@ function n2(v: any) {
 
 function money(v: any) {
   const n = n2(v);
-  return `Rs ${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `Rs ${n.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 function fmtDate(v?: string | null) {
@@ -150,6 +153,31 @@ function statusTone(st?: string) {
   if (s === "EXPIRED") return "bg-amber-50 text-amber-800 ring-1 ring-amber-200";
   if (s === "DRAFT") return "bg-slate-50 text-slate-700 ring-1 ring-slate-200";
   return "bg-slate-50 text-slate-700 ring-1 ring-slate-200";
+}
+
+function exportCsv(filename: string, head: string[], rows: (string | number)[][]) {
+  const csv =
+    [head, ...rows]
+      .map((row) =>
+        row
+          .map((c) => {
+            const s = String(c ?? "");
+            const needs = s.includes(",") || s.includes('"') || s.includes("\n");
+            return needs ? `"${s.replaceAll('"', '""')}"` : s;
+          })
+          .join(",")
+      )
+      .join("\n") + "\n";
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 /* =========================================
@@ -230,6 +258,8 @@ const STATUS_OPTIONS = ["ALL", "DRAFT", "SENT", "ACCEPTED", "REJECTED", "EXPIRED
 type StatusFilter = (typeof STATUS_OPTIONS)[number];
 
 export default function QuotationsPage() {
+  const router = useRouter();
+
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState("");
 
@@ -246,14 +276,14 @@ export default function QuotationsPage() {
 
   const [refreshTick, setRefreshTick] = React.useState(0);
 
-  async function load() {
+  async function load(p = page) {
     setLoading(true);
     setErr("");
     try {
       const params = new URLSearchParams();
       if (qd.trim()) params.set("q", qd.trim());
-      if (status) params.set("status", status);
-      params.set("page", String(page));
+      params.set("status", status);
+      params.set("page", String(p));
       params.set("pageSize", String(pageSize));
 
       const res = await safeGet<QuotesResponse>(`/api/quotations?${params.toString()}`);
@@ -273,16 +303,17 @@ export default function QuotationsPage() {
   }
 
   React.useEffect(() => {
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qd, status, page, pageSize, refreshTick]);
-
-  React.useEffect(() => {
     setPage(1);
+    void load(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qd, status]);
 
-  const hasMore = meta?.hasMore ?? (rows.length === pageSize);
+  React.useEffect(() => {
+    void load(page);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, refreshTick]);
+
+  const hasMore = meta?.hasMore ?? rows.length === pageSize;
   const totalCount = meta?.total ?? rows.length;
 
   const byStatus = kpi?.byStatus ?? {};
@@ -292,13 +323,57 @@ export default function QuotationsPage() {
   const rejected = byStatus["REJECTED"] ?? 0;
   const expired = byStatus["EXPIRED"] ?? 0;
 
+  const currentTotal = rows.reduce((s, r) => s + n2(r.total_amount), 0);
+  const currentExpired = rows.filter((r) => isExpired(r.valid_until) || String(r.status).toUpperCase() === "EXPIRED").length;
+  const avgValue = rows.length ? currentTotal / rows.length : 0;
+
+  function exportCurrentCsv() {
+    const head = [
+      "Quotation No",
+      "Customer",
+      "Quote Date",
+      "Valid Until",
+      "Total",
+      "Status",
+    ];
+
+    const body = rows.map((r) => [
+      r.quote_no,
+      r.customer_name || "—",
+      fmtDate(r.quote_date),
+      fmtDate(r.valid_until),
+      n2(r.total_amount).toFixed(2),
+      r.status || "—",
+    ]);
+
+    exportCsv("quotations-register.csv", head, body);
+  }
+
+  function sendWhatsApp(id: string, quoteNo: string, customerName: string | null) {
+    const base = typeof window !== "undefined" ? window.location.origin : "";
+    const printUrl = `${base}/sales/quotations/${encodeURIComponent(id)}/print`;
+
+    const text = [
+      `Dear ${customerName || "Customer"},`,
+      ``,
+      `Please find your quotation ${quoteNo}.`,
+      `You can view / print it here:`,
+      `${printUrl}`,
+      ``,
+      `KS Contracting Ltd`,
+    ].join("\n");
+
+    const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    window.open(waUrl, "_blank", "noopener,noreferrer");
+  }
+
   return (
     <div className="space-y-4">
       {/* Premium header */}
       <div className="relative overflow-hidden rounded-3xl ring-1 ring-slate-200 bg-white">
         <div className="absolute inset-0 bg-[radial-gradient(900px_460px_at_12%_-20%,rgba(7,27,56,0.14),transparent_60%),radial-gradient(700px_420px_at_110%_-10%,rgba(255,122,24,0.14),transparent_60%),linear-gradient(180deg,rgba(248,250,252,1),rgba(255,255,255,1))]" />
         <div className="relative px-5 py-4 sm:px-7 sm:py-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <Chip>
@@ -316,10 +391,11 @@ export default function QuotationsPage() {
               </div>
 
               <h1 className="mt-2 text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
-                Quotations
+                Quotation Register
               </h1>
               <div className="mt-1 text-sm text-slate-600">
-                Search, filter, and open quotation details with a premium dashboard UI.
+                Ultra-premium quotation workspace with real figures, powerful search, print, WhatsApp share,
+                and executive pipeline visibility.
               </div>
             </div>
 
@@ -333,6 +409,16 @@ export default function QuotationsPage() {
               >
                 <RefreshCw className={cn("mr-2 size-4", loading && "animate-spin")} />
                 Refresh
+              </Button>
+
+              <Button
+                variant="outline"
+                className="rounded-2xl h-11 bg-white/70 shadow-sm hover:bg-white"
+                onClick={exportCurrentCsv}
+                disabled={rows.length === 0}
+              >
+                <Download className="mr-2 size-4" />
+                Export CSV
               </Button>
 
               <Link href="/sales/quotations/new">
@@ -351,7 +437,7 @@ export default function QuotationsPage() {
               <Input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Search quotation no or customer name…"
+                placeholder="Search quotation no or customer name..."
                 className="h-11 rounded-2xl pl-10"
               />
             </div>
@@ -394,34 +480,55 @@ export default function QuotationsPage() {
       </div>
 
       {/* KPI */}
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
         <KPICard
           icon={BadgeCheck}
-          label="Total quotations"
-          value={String(kpi?.totalQuotes ?? (loading ? "…" : rows.length))}
+          label="Quotation Count"
+          value={String(kpi?.totalQuotes ?? totalCount)}
           sub={`Draft ${drafts} • Sent ${sent} • Accepted ${accepted}`}
           tone="blue"
         />
         <KPICard
           icon={CircleDollarSign}
-          label="Total value"
-          value={money(kpi?.totalValue ?? 0)}
+          label="Pipeline Value"
+          value={money(kpi?.totalValue ?? currentTotal)}
           sub="All listed quotations"
           tone="emerald"
         />
         <KPICard
           icon={Clock3}
           label="Pending"
-          value={String(kpi?.pendingCount ?? (drafts + sent))}
+          value={String(kpi?.pendingCount ?? drafts + sent)}
           sub="Draft + Sent"
           tone="orange"
         />
         <KPICard
           icon={AlertTriangle}
-          label="Expired"
-          value={String(kpi?.expiredCount ?? expired)}
-          sub={`Rejected ${rejected}`}
+          label="Expired / Rejected"
+          value={String((kpi?.expiredCount ?? expired) + rejected)}
+          sub={`Expired ${currentExpired} in current view`}
           tone="rose"
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <KPICard
+          icon={CheckCircle2}
+          label="Accepted"
+          value={String(accepted)}
+          sub="Won quotations"
+        />
+        <KPICard
+          icon={XCircle}
+          label="Rejected"
+          value={String(rejected)}
+          sub="Lost quotations"
+        />
+        <KPICard
+          icon={CircleDollarSign}
+          label="Average Value"
+          value={money(avgValue)}
+          sub="Average quotation size"
         />
       </div>
 
@@ -429,9 +536,9 @@ export default function QuotationsPage() {
       <Card3D className="p-0">
         <div className="flex items-center justify-between gap-2 px-5 py-4">
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-slate-900">Quotation list</div>
+            <div className="text-sm font-semibold text-slate-900">Premium Quotation Table</div>
             <div className="mt-0.5 text-xs text-slate-600">
-              Click a row to open quotation details. Use menu actions for print (if you add print page).
+              Real customer names, quotation dates, validity, print action, and WhatsApp share.
             </div>
           </div>
 
@@ -442,15 +549,16 @@ export default function QuotationsPage() {
 
         <div className="overflow-hidden rounded-b-3xl border-t border-slate-200">
           <div className="overflow-auto">
-            <table className="w-full min-w-[980px] text-sm">
+            <table className="w-full min-w-[1220px] text-sm">
               <thead className="bg-slate-50 text-slate-600">
                 <tr className="[&>th]:px-5 [&>th]:py-3 [&>th]:text-left [&>th]:font-semibold">
                   <th className="w-[210px]">Quotation</th>
-                  <th>Customer</th>
+                  <th className="w-[260px]">Customer</th>
                   <th className="w-[140px]">Quote Date</th>
                   <th className="w-[160px]">Valid Until</th>
                   <th className="w-[160px] text-right">Total</th>
                   <th className="w-[150px]">Status</th>
+                  <th className="w-[300px]">Quick Actions</th>
                   <th className="w-[64px] text-right"> </th>
                 </tr>
               </thead>
@@ -459,32 +567,19 @@ export default function QuotationsPage() {
                 {loading ? (
                   Array.from({ length: 8 }).map((_, i) => (
                     <tr key={i} className="animate-pulse">
-                      <td className="px-5 py-4">
-                        <div className="h-4 w-28 rounded bg-slate-200" />
-                      </td>
-                      <td className="px-5 py-4">
-                        <div className="h-4 w-40 rounded bg-slate-200" />
-                      </td>
-                      <td className="px-5 py-4">
-                        <div className="h-4 w-24 rounded bg-slate-200" />
-                      </td>
-                      <td className="px-5 py-4">
-                        <div className="h-4 w-28 rounded bg-slate-200" />
-                      </td>
-                      <td className="px-5 py-4 text-right">
-                        <div className="ml-auto h-4 w-24 rounded bg-slate-200" />
-                      </td>
-                      <td className="px-5 py-4">
-                        <div className="h-6 w-24 rounded-full bg-slate-200" />
-                      </td>
-                      <td className="px-5 py-4 text-right">
-                        <div className="ml-auto h-8 w-8 rounded-2xl bg-slate-200" />
-                      </td>
+                      <td className="px-5 py-4"><div className="h-4 w-28 rounded bg-slate-200" /></td>
+                      <td className="px-5 py-4"><div className="h-4 w-40 rounded bg-slate-200" /></td>
+                      <td className="px-5 py-4"><div className="h-4 w-24 rounded bg-slate-200" /></td>
+                      <td className="px-5 py-4"><div className="h-4 w-28 rounded bg-slate-200" /></td>
+                      <td className="px-5 py-4 text-right"><div className="ml-auto h-4 w-24 rounded bg-slate-200" /></td>
+                      <td className="px-5 py-4"><div className="h-6 w-24 rounded-full bg-slate-200" /></td>
+                      <td className="px-5 py-4"><div className="h-9 w-56 rounded-2xl bg-slate-200" /></td>
+                      <td className="px-5 py-4 text-right"><div className="ml-auto h-9 w-9 rounded-2xl bg-slate-200" /></td>
                     </tr>
                   ))
                 ) : rows.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-5 py-12 text-center text-slate-500">
+                    <td colSpan={8} className="px-5 py-12 text-center text-slate-500">
                       No quotations found.
                       <div className="mt-3">
                         <Link href="/sales/quotations/new">
@@ -498,17 +593,27 @@ export default function QuotationsPage() {
                   </tr>
                 ) : (
                   rows.map((r) => {
-                    const total = n2(r.total_amount);
                     const expiredRow = isExpired(r.valid_until) || String(r.status || "").toUpperCase() === "EXPIRED";
+                    const href = `/sales/quotations/${encodeURIComponent(r.id)}`;
 
                     return (
                       <tr
                         key={r.id}
-                        className={cn("group transition hover:bg-slate-50/70", expiredRow && "bg-amber-50/35")}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => router.push(href)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") router.push(href);
+                        }}
+                        className={cn(
+                          "group transition hover:bg-slate-50/70 cursor-pointer",
+                          expiredRow && "bg-amber-50/35"
+                        )}
                       >
                         <td className="px-5 py-4">
                           <Link
-                            href={`/sales/quotations/${encodeURIComponent(r.id)}`}
+                            href={href}
+                            onClick={(e) => e.stopPropagation()}
                             className="inline-flex items-center gap-2 font-extrabold text-slate-900 hover:underline"
                           >
                             {r.quote_no}
@@ -542,7 +647,7 @@ export default function QuotationsPage() {
                         </td>
 
                         <td className="px-5 py-4 text-right font-extrabold text-slate-900">
-                          {money(total)}
+                          {money(r.total_amount)}
                         </td>
 
                         <td className="px-5 py-4">
@@ -551,28 +656,76 @@ export default function QuotationsPage() {
                           </span>
                         </td>
 
-                        <td className="px-5 py-4 text-right">
+                        <td className="px-5 py-4" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex flex-wrap gap-2">
+                            <Link href={href}>
+                              <Button variant="outline" className="h-9 rounded-xl">
+                                Open
+                              </Button>
+                            </Link>
+
+                            <Button
+                              variant="outline"
+                              className="h-9 rounded-xl"
+                              onClick={() =>
+                                window.open(
+                                  `/sales/quotations/${encodeURIComponent(r.id)}/print`,
+                                  "_blank",
+                                  "noopener,noreferrer"
+                                )
+                              }
+                            >
+                              <Printer className="mr-2 size-4" />
+                              Print
+                            </Button>
+
+                            <Button
+                              variant="outline"
+                              className="h-9 rounded-xl"
+                              onClick={() => sendWhatsApp(r.id, r.quote_no, r.customer_name)}
+                            >
+                              <MessageCircle className="mr-2 size-4" />
+                              WhatsApp
+                            </Button>
+                          </div>
+                        </td>
+
+                        <td className="px-5 py-4 text-right" onClick={(e) => e.stopPropagation()}>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button variant="outline" className="h-9 w-9 rounded-2xl p-0 bg-white/70 hover:bg-white">
                                 <span className="sr-only">Actions</span>
-                                <ArrowUpRight className="size-4 text-slate-600" />
+                                <MoreHorizontal className="size-4 text-slate-600" />
                               </Button>
                             </DropdownMenuTrigger>
 
                             <DropdownMenuContent align="end" className="w-56">
                               <DropdownMenuItem asChild>
-                                <Link href={`/sales/quotations/${encodeURIComponent(r.id)}`}>Open details</Link>
+                                <Link href={href}>Open details</Link>
+                              </DropdownMenuItem>
+
+                              <DropdownMenuItem
+                                onClick={() =>
+                                  window.open(
+                                    `/sales/quotations/${encodeURIComponent(r.id)}/print`,
+                                    "_blank",
+                                    "noopener,noreferrer"
+                                  )
+                                }
+                              >
+                                Print / Save PDF
+                              </DropdownMenuItem>
+
+                              <DropdownMenuItem
+                                onClick={() => sendWhatsApp(r.id, r.quote_no, r.customer_name)}
+                              >
+                                Send to WhatsApp
                               </DropdownMenuItem>
 
                               <DropdownMenuSeparator />
 
-                              <DropdownMenuItem
-                                onClick={() =>
-                                  window.open(`/sales/quotations/${encodeURIComponent(r.id)}/print`, "_blank", "noopener,noreferrer")
-                                }
-                              >
-                                Print / Save PDF
+                              <DropdownMenuItem disabled>
+                                Convert to invoice (next)
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>

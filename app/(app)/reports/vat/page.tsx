@@ -11,6 +11,12 @@ import {
   AlertTriangle,
   BadgeCheck,
   CircleDollarSign,
+  Filter,
+  TrendingUp,
+  Landmark,
+  Building2,
+  Users,
+  Wallet,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -18,21 +24,57 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 /* =========================================
-   Types (simple + safe)
-   - Wire to your real API later
+   Types
 ========================================= */
+
+type InvoiceRow = {
+  id: string;
+  invoice_no: string;
+  invoice_type?: string | null;
+  invoice_date?: string | null;
+  customer_name?: string | null;
+  subtotal?: number | null;
+  vat_amount?: number | null;
+  total_amount?: number | null;
+  paid_amount?: number | null;
+  balance_amount?: number | null;
+  status?: string | null;
+  created_at?: string | null;
+};
+
+type CreditNoteRow = {
+  id: string;
+  credit_no: string;
+  credit_date?: string | null;
+  customer_name?: string | null;
+  subtotal?: number | null;
+  vat?: number | null;
+  total_amount?: number | null;
+  status?: string | null;
+  created_at?: string | null;
+};
 
 type VatRow = {
   id: string;
-  doc_type: "INVOICE" | "CREDIT_NOTE" | "RECEIPT" | string;
+  doc_type: "INVOICE" | "CREDIT_NOTE" | string;
   doc_no: string;
-  doc_date: string; // yyyy-mm-dd
+  doc_date: string;
   customer_name: string;
   taxable_amount: number;
-  vat_rate: number; // 0.15
+  vat_rate: number;
   vat_amount: number;
   total_amount: number;
   status: string;
+};
+
+type ApiInvoiceList = {
+  ok: boolean;
+  data?: InvoiceRow[];
+};
+
+type ApiCreditNoteList = {
+  ok: boolean;
+  data?: CreditNoteRow[];
 };
 
 /* =========================================
@@ -46,7 +88,10 @@ function n2(v: any) {
 
 function money(v: any) {
   const n = n2(v);
-  return `Rs ${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `Rs ${n.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 function fmtDate(v?: string | null) {
@@ -64,6 +109,82 @@ function pct(v: any) {
   const x = n2(v);
   return `${Math.round(x * 10000) / 100}%`;
 }
+
+function safeDate(v?: string | null) {
+  if (!v) return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+async function safeGet<T>(url: string): Promise<T> {
+  const res = await fetch(url, { cache: "no-store" });
+  const ct = res.headers.get("content-type") || "";
+  const text = await res.text();
+
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}: ${text.slice(0, 240)}`);
+  }
+
+  if (!ct.includes("application/json")) {
+    throw new Error(`Expected JSON. Got ${ct || "unknown"}`);
+  }
+
+  return JSON.parse(text) as T;
+}
+
+function exportCsv(filename: string, head: string[], rows: (string | number)[][]) {
+  const csv =
+    [head, ...rows]
+      .map((row) =>
+        row
+          .map((c) => {
+            const s = String(c ?? "");
+            const needs = s.includes(",") || s.includes('"') || s.includes("\n");
+            return needs ? `"${s.replaceAll('"', '""')}"` : s;
+          })
+          .join(",")
+      )
+      .join("\n") + "\n";
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function badgeTone(st?: string) {
+  const s = String(st || "").toUpperCase();
+  if (s === "PAID") return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200";
+  if (s === "ISSUED") return "bg-blue-50 text-blue-700 ring-1 ring-blue-200";
+  if (s === "PARTIALLY_PAID") return "bg-amber-50 text-amber-800 ring-1 ring-amber-200";
+  if (s === "VOID") return "bg-rose-50 text-rose-700 ring-1 ring-rose-200";
+  if (s === "DRAFT") return "bg-slate-50 text-slate-700 ring-1 ring-slate-200";
+  return "bg-slate-50 text-slate-700 ring-1 ring-slate-200";
+}
+
+function inRange(dateValue: string | null | undefined, from?: string, to?: string) {
+  const d = safeDate(dateValue);
+  if (!d) return false;
+
+  const f = from ? new Date(from) : null;
+  const t = to ? new Date(to) : null;
+
+  if (f) f.setHours(0, 0, 0, 0);
+  if (t) t.setHours(23, 59, 59, 999);
+
+  if (f && d < f) return false;
+  if (t && d > t) return false;
+  return true;
+}
+
+/* =========================================
+   UI
+========================================= */
 
 function Chip({
   children,
@@ -143,122 +264,128 @@ function KPICard({
   );
 }
 
-function badgeTone(st?: string) {
-  const s = String(st || "").toUpperCase();
-  if (s === "PAID") return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200";
-  if (s === "ISSUED") return "bg-blue-50 text-blue-700 ring-1 ring-blue-200";
-  if (s === "PARTIALLY_PAID") return "bg-amber-50 text-amber-800 ring-1 ring-amber-200";
-  if (s === "VOID") return "bg-rose-50 text-rose-700 ring-1 ring-rose-200";
-  if (s === "DRAFT") return "bg-slate-50 text-slate-700 ring-1 ring-slate-200";
-  return "bg-slate-50 text-slate-700 ring-1 ring-slate-200";
-}
-
 /* =========================================
    Page
 ========================================= */
 
 export default function VatReportPage() {
-  // Filters (local UI; wire to API later)
   const today = React.useMemo(() => new Date(), []);
   const yyyy = today.getFullYear();
   const mm = String(today.getMonth() + 1).padStart(2, "0");
+  const monthEnd = String(new Date(yyyy, today.getMonth() + 1, 0).getDate()).padStart(2, "0");
 
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState("");
 
   const [q, setQ] = React.useState("");
   const [from, setFrom] = React.useState(`${yyyy}-${mm}-01`);
-  const [to, setTo] = React.useState(`${yyyy}-${mm}-${String(new Date(yyyy, today.getMonth() + 1, 0).getDate()).padStart(2, "0")}`);
+  const [to, setTo] = React.useState(`${yyyy}-${mm}-${monthEnd}`);
+  const [docType, setDocType] = React.useState<"ALL" | "INVOICE" | "CREDIT_NOTE">("ALL");
+  const [status, setStatus] = React.useState("ALL");
 
-  // Demo rows so the page is not empty (replace with real API later)
-  const [rows, setRows] = React.useState<VatRow[]>([
-    {
-      id: "demo-1",
+  const [invoiceRows, setInvoiceRows] = React.useState<InvoiceRow[]>([]);
+  const [creditNoteRows, setCreditNoteRows] = React.useState<CreditNoteRow[]>([]);
+
+  const loadReport = React.useCallback(async () => {
+    setLoading(true);
+    setErr("");
+
+    try {
+      const [invRes, cnRes] = await Promise.all([
+        safeGet<ApiInvoiceList>("/api/invoices?page=1&pageSize=500"),
+        safeGet<ApiCreditNoteList>("/api/credit-notes?page=1&pageSize=500"),
+      ]);
+
+      setInvoiceRows(Array.isArray(invRes.data) ? invRes.data : []);
+      setCreditNoteRows(Array.isArray(cnRes.data) ? cnRes.data : []);
+    } catch (e: any) {
+      setErr(e?.message || "Failed to load VAT report");
+      setInvoiceRows([]);
+      setCreditNoteRows([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void loadReport();
+  }, [loadReport]);
+
+  const rows = React.useMemo<VatRow[]>(() => {
+    const invoiceVatRows: VatRow[] = invoiceRows.map((r) => ({
+      id: r.id,
       doc_type: "INVOICE",
-      doc_no: "INV-000123",
-      doc_date: `${yyyy}-${mm}-05`,
-      customer_name: "Demo Customer Ltd",
-      taxable_amount: 10000,
+      doc_no: r.invoice_no,
+      doc_date: r.invoice_date || r.created_at || "",
+      customer_name: r.customer_name || "—",
+      taxable_amount: n2(r.subtotal),
       vat_rate: 0.15,
-      vat_amount: 1500,
-      total_amount: 11500,
-      status: "ISSUED",
-    },
-    {
-      id: "demo-2",
-      doc_type: "INVOICE",
-      doc_no: "INV-000124",
-      doc_date: `${yyyy}-${mm}-12`,
-      customer_name: "Another Client",
-      taxable_amount: 5000,
-      vat_rate: 0.15,
-      vat_amount: 750,
-      total_amount: 5750,
-      status: "PAID",
-    },
-    {
-      id: "demo-3",
+      vat_amount: n2(r.vat_amount),
+      total_amount: n2(r.total_amount),
+      status: r.status || "—",
+    }));
+
+    const creditVatRows: VatRow[] = creditNoteRows.map((r) => ({
+      id: r.id,
       doc_type: "CREDIT_NOTE",
-      doc_no: "CN-000010",
-      doc_date: `${yyyy}-${mm}-16`,
-      customer_name: "Demo Customer Ltd",
-      taxable_amount: -2000,
+      doc_no: r.credit_no,
+      doc_date: r.credit_date || r.created_at || "",
+      customer_name: r.customer_name || "—",
+      taxable_amount: -Math.abs(n2(r.subtotal)),
       vat_rate: 0.15,
-      vat_amount: -300,
-      total_amount: -2300,
-      status: "ISSUED",
-    },
-  ]);
+      vat_amount: -Math.abs(n2(r.vat)),
+      total_amount: -Math.abs(n2(r.total_amount)),
+      status: r.status || "—",
+    }));
 
-  function applyFilters(list: VatRow[]) {
-    const qq = q.trim().toLowerCase();
-    const f = from ? new Date(from) : null;
-    const t = to ? new Date(to) : null;
-    if (f) f.setHours(0, 0, 0, 0);
-    if (t) t.setHours(23, 59, 59, 999);
-
-    return list.filter((r) => {
-      const dt = r.doc_date ? new Date(r.doc_date) : null;
-      const okDate =
-        (!f || (dt && dt >= f)) &&
-        (!t || (dt && dt <= t));
-
-      if (!okDate) return false;
-
-      if (!qq) return true;
-      const hay = `${r.doc_no} ${r.customer_name} ${r.doc_type} ${r.status}`.toLowerCase();
-      return hay.includes(qq);
+    return [...invoiceVatRows, ...creditVatRows].sort((a, b) => {
+      return String(b.doc_date).localeCompare(String(a.doc_date));
     });
-  }
+  }, [invoiceRows, creditNoteRows]);
 
-  const filtered = React.useMemo(() => applyFilters(rows), [rows, q, from, to]);
+  const filtered = React.useMemo(() => {
+    const qq = q.trim().toLowerCase();
+
+    return rows.filter((r) => {
+      const hay = `${r.doc_no} ${r.customer_name} ${r.doc_type} ${r.status}`.toLowerCase();
+
+      const okQuery = !qq || hay.includes(qq);
+      const okDate = inRange(r.doc_date, from, to);
+      const okType = docType === "ALL" || r.doc_type === docType;
+      const okStatus = status === "ALL" || String(r.status).toUpperCase() === status;
+
+      return okQuery && okDate && okType && okStatus;
+    });
+  }, [rows, q, from, to, docType, status]);
 
   const totals = React.useMemo(() => {
     const taxable = filtered.reduce((s, r) => s + n2(r.taxable_amount), 0);
     const vat = filtered.reduce((s, r) => s + n2(r.vat_amount), 0);
     const total = filtered.reduce((s, r) => s + n2(r.total_amount), 0);
     const docs = filtered.length;
-    return { taxable, vat, total, docs };
+    const invoices = filtered.filter((r) => r.doc_type === "INVOICE").length;
+    const creditNotes = filtered.filter((r) => r.doc_type === "CREDIT_NOTE").length;
+    return { taxable, vat, total, docs, invoices, creditNotes };
   }, [filtered]);
 
-  async function refresh() {
-    // placeholder so build passes; wire to /api/reports/vat later
-    setLoading(true);
-    setErr("");
-    try {
-      // Example:
-      // const res = await fetch(`/api/reports/vat?from=${from}&to=${to}&q=${encodeURIComponent(q)}`, { cache: "no-store" });
-      // const j = await res.json();
-      // setRows(j.data)
-      await new Promise((r) => setTimeout(r, 350));
-    } catch (e: any) {
-      setErr(e?.message || "Failed to load VAT report");
-    } finally {
-      setLoading(false);
-    }
-  }
+  const topCustomers = React.useMemo(() => {
+    const map = new Map<string, { name: string; taxable: number; vat: number; total: number }>();
 
-  function exportCsv() {
+    filtered.forEach((r) => {
+      const key = r.customer_name || "—";
+      const prev = map.get(key) || { name: key, taxable: 0, vat: 0, total: 0 };
+      prev.taxable += n2(r.taxable_amount);
+      prev.vat += n2(r.vat_amount);
+      prev.total += n2(r.total_amount);
+      map.set(key, prev);
+    });
+
+    return Array.from(map.values())
+      .sort((a, b) => Math.abs(b.total) - Math.abs(a.total))
+      .slice(0, 8);
+  }, [filtered]);
+
+  function exportCurrentCsv() {
     const head = [
       "Doc Type",
       "Doc No",
@@ -270,10 +397,11 @@ export default function VatReportPage() {
       "Total",
       "Status",
     ];
+
     const body = filtered.map((r) => [
       r.doc_type,
       r.doc_no,
-      r.doc_date,
+      fmtDate(r.doc_date),
       r.customer_name,
       n2(r.taxable_amount).toFixed(2),
       pct(r.vat_rate),
@@ -282,28 +410,19 @@ export default function VatReportPage() {
       r.status,
     ]);
 
-    const csv =
-      [head, ...body]
-        .map((row) =>
-          row
-            .map((c) => {
-              const s = String(c ?? "");
-              const needs = s.includes(",") || s.includes('"') || s.includes("\n");
-              return needs ? `"${s.replaceAll('"', '""')}"` : s;
-            })
-            .join(",")
-        )
-        .join("\n") + "\n";
+    exportCsv(`vat-report_${from}_${to}.csv`, head, body);
+  }
 
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `vat-report_${from || "from"}_${to || "to"}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+  function exportCustomerCsv() {
+    const head = ["Customer", "Taxable Amount", "VAT Amount", "Total"];
+    const body = topCustomers.map((r) => [
+      r.name,
+      r.taxable.toFixed(2),
+      r.vat.toFixed(2),
+      r.total.toFixed(2),
+    ]);
+
+    exportCsv(`vat-by-customer_${from}_${to}.csv`, head, body);
   }
 
   return (
@@ -317,11 +436,11 @@ export default function VatReportPage() {
               <div className="flex flex-wrap items-center gap-2">
                 <Chip>
                   <FileText className="size-3.5 text-slate-500" />
-                  Reports
+                  Enterprise Reports
                 </Chip>
                 <Chip className="bg-[#ff7a18]/10 text-[#c25708] ring-[#ff7a18]/20">
                   <BadgeCheck className="size-3.5" />
-                  VAT
+                  VAT Control
                 </Chip>
                 <Chip className="bg-slate-900 text-white ring-slate-900/20">
                   <CircleDollarSign className="size-3.5 text-white/85" />
@@ -330,10 +449,11 @@ export default function VatReportPage() {
               </div>
 
               <h1 className="mt-2 text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
-                VAT Report
+                VAT Report Centre
               </h1>
               <div className="mt-1 text-sm text-slate-600">
-                Filter by period and export for filing (demo data until API is wired).
+                Management-grade VAT reporting from live invoices and credit notes, with executive
+                totals, customer concentration analysis, and export-ready detail lines.
               </div>
             </div>
 
@@ -341,7 +461,7 @@ export default function VatReportPage() {
               <Button
                 variant="outline"
                 className="rounded-2xl h-11 bg-white/70 shadow-sm hover:bg-white"
-                onClick={refresh}
+                onClick={() => void loadReport()}
                 disabled={loading}
               >
                 <RefreshCw className={cn("mr-2 size-4", loading && "animate-spin")} />
@@ -350,24 +470,23 @@ export default function VatReportPage() {
 
               <Button
                 className="rounded-2xl h-11 bg-[#071b38] text-white hover:bg-[#06142b] shadow-[0_16px_44px_rgba(7,27,56,0.18)]"
-                onClick={exportCsv}
+                onClick={exportCurrentCsv}
                 disabled={filtered.length === 0}
-                title="Export current filtered rows to CSV"
               >
                 <Download className="mr-2 size-4" />
-                Export CSV
+                Export VAT CSV
               </Button>
             </div>
           </div>
 
           {/* Filters */}
-          <div className="mt-5 grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto_auto_auto]">
+          <div className="mt-5 grid grid-cols-1 gap-3 xl:grid-cols-[1fr_auto_auto_auto_auto]">
             <div className="relative">
               <Search className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
               <Input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Search doc no, customer, status…"
+                placeholder="Search doc no, customer, status..."
                 className="h-11 rounded-2xl pl-10"
               />
             </div>
@@ -394,9 +513,33 @@ export default function VatReportPage() {
               />
             </div>
 
-            <div className="flex items-center justify-between gap-3 rounded-2xl bg-white/70 ring-1 ring-slate-200 px-4 h-11">
-              <span className="text-xs font-semibold text-slate-600">Docs</span>
-              <span className="text-sm font-extrabold text-slate-900">{totals.docs}</span>
+            <div className="flex items-center gap-2 rounded-2xl bg-white/70 ring-1 ring-slate-200 px-3 h-11">
+              <Filter className="size-4 text-slate-400" />
+              <select
+                value={docType}
+                onChange={(e) => setDocType(e.target.value as "ALL" | "INVOICE" | "CREDIT_NOTE")}
+                className="bg-transparent text-sm font-semibold text-slate-900 outline-none"
+              >
+                <option value="ALL">All Types</option>
+                <option value="INVOICE">Invoices</option>
+                <option value="CREDIT_NOTE">Credit Notes</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2 rounded-2xl bg-white/70 ring-1 ring-slate-200 px-3 h-11">
+              <Building2 className="size-4 text-slate-400" />
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value)}
+                className="bg-transparent text-sm font-semibold text-slate-900 outline-none"
+              >
+                <option value="ALL">All Statuses</option>
+                <option value="DRAFT">Draft</option>
+                <option value="ISSUED">Issued</option>
+                <option value="PAID">Paid</option>
+                <option value="PARTIALLY_PAID">Partially Paid</option>
+                <option value="VOID">Void</option>
+              </select>
             </div>
           </div>
 
@@ -409,37 +552,97 @@ export default function VatReportPage() {
       </div>
 
       {/* KPI */}
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
         <KPICard
-          icon={ArrowUpRight}
-          label="Taxable amount"
+          icon={TrendingUp}
+          label="Taxable Base"
           value={money(totals.taxable)}
-          sub="Sum of taxable base"
+          sub={`${totals.invoices} invoice rows in scope`}
           tone="blue"
         />
         <KPICard
           icon={BadgeCheck}
-          label="VAT amount"
+          label="VAT Amount"
           value={money(totals.vat)}
-          sub="VAT collected (net)"
+          sub="Net VAT after credit note offsets"
           tone="orange"
         />
         <KPICard
-          icon={CircleDollarSign}
-          label="Grand total"
+          icon={Wallet}
+          label="Gross Total"
           value={money(totals.total)}
-          sub="Taxable + VAT (net)"
+          sub="Taxable plus VAT"
           tone="emerald"
+        />
+        <KPICard
+          icon={Landmark}
+          label="Document Volume"
+          value={String(totals.docs)}
+          sub={`${totals.creditNotes} credit note rows included`}
+          tone="slate"
         />
       </div>
 
-      {/* Table */}
+      {/* Summary by customer */}
+      <Card3D className="p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <div className="text-sm font-semibold text-slate-900">Customer VAT Concentration</div>
+            <div className="mt-1 text-sm text-slate-600">
+              Highest contributing customers for the selected reporting period.
+            </div>
+          </div>
+
+          <Button
+            variant="outline"
+            className="rounded-2xl"
+            onClick={exportCustomerCsv}
+            disabled={topCustomers.length === 0}
+          >
+            <Download className="mr-2 size-4" />
+            Export Customer Summary
+          </Button>
+        </div>
+
+        <div className="mt-4 overflow-auto">
+          <table className="w-full min-w-[760px] text-sm">
+            <thead className="bg-slate-50 text-slate-600">
+              <tr className="[&>th]:px-4 [&>th]:py-3 [&>th]:text-left [&>th]:font-semibold">
+                <th>Customer</th>
+                <th className="text-right">Taxable Amount</th>
+                <th className="text-right">VAT Amount</th>
+                <th className="text-right">Gross Total</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {topCustomers.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="px-4 py-10 text-center text-slate-500">
+                    No customer summary available for this period.
+                  </td>
+                </tr>
+              ) : (
+                topCustomers.map((r) => (
+                  <tr key={r.name}>
+                    <td className="px-4 py-3 font-semibold text-slate-900">{r.name}</td>
+                    <td className="px-4 py-3 text-right text-slate-900">{money(r.taxable)}</td>
+                    <td className="px-4 py-3 text-right font-semibold text-slate-900">{money(r.vat)}</td>
+                    <td className="px-4 py-3 text-right font-extrabold text-slate-900">{money(r.total)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card3D>
+
+      {/* Detail table */}
       <Card3D className="p-0">
         <div className="flex items-center justify-between gap-2 px-5 py-4">
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-slate-900">VAT transactions</div>
+            <div className="text-sm font-semibold text-slate-900">Detailed VAT Lines</div>
             <div className="mt-0.5 text-xs text-slate-600">
-              Includes invoices and credit notes (demo dataset).
+              Real invoice and credit note figures pulled from KS transaction data.
             </div>
           </div>
 
@@ -472,13 +675,13 @@ export default function VatReportPage() {
                       No VAT transactions found for this filter.
                       <div className="mt-3 inline-flex items-center gap-2 text-xs text-slate-500">
                         <AlertTriangle className="size-4 text-slate-400" />
-                        Tip: change date range or clear search.
+                        Try changing date range, type, or status.
                       </div>
                     </td>
                   </tr>
                 ) : (
                   filtered.map((r) => (
-                    <tr key={r.id} className="hover:bg-slate-50/70 transition">
+                    <tr key={`${r.doc_type}-${r.id}`} className="hover:bg-slate-50/70 transition">
                       <td className="px-5 py-4">
                         <span className="inline-flex rounded-full px-3 py-1 text-xs font-semibold bg-slate-50 text-slate-700 ring-1 ring-slate-200">
                           {String(r.doc_type || "—")}
@@ -518,7 +721,12 @@ export default function VatReportPage() {
                       </td>
 
                       <td className="px-5 py-4">
-                        <span className={cn("inline-flex rounded-full px-3 py-1 text-xs font-semibold", badgeTone(r.status))}>
+                        <span
+                          className={cn(
+                            "inline-flex rounded-full px-3 py-1 text-xs font-semibold",
+                            badgeTone(r.status)
+                          )}
+                        >
                           {String(r.status || "—").replaceAll("_", " ")}
                         </span>
                       </td>
@@ -526,7 +734,50 @@ export default function VatReportPage() {
                   ))
                 )}
               </tbody>
+
+              {filtered.length > 0 ? (
+                <tfoot className="bg-slate-50">
+                  <tr className="[&>td]:px-5 [&>td]:py-4 [&>td]:font-extrabold">
+                    <td colSpan={4} className="text-right text-slate-700">
+                      NET TOTALS
+                    </td>
+                    <td className="text-right text-slate-900">{money(totals.taxable)}</td>
+                    <td className="text-right text-slate-700">{pct(0.15)}</td>
+                    <td className="text-right text-slate-900">{money(totals.vat)}</td>
+                    <td className="text-right text-slate-900">{money(totals.total)}</td>
+                    <td />
+                  </tr>
+                </tfoot>
+              ) : null}
             </table>
+          </div>
+        </div>
+      </Card3D>
+
+      {/* Footer enterprise note */}
+      <Card3D className="p-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div className="text-sm font-semibold text-slate-900">Management Note</div>
+            <div className="mt-1 text-sm text-slate-600">
+              This VAT report is based on live invoice and credit note values. Credit notes reduce
+              taxable base, VAT, and gross totals automatically.
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Chip>
+              <Users className="size-3.5 text-slate-500" />
+              Enterprise Finance View
+            </Chip>
+            <Chip>
+              <BadgeCheck className="size-3.5 text-slate-500" />
+              15% VAT Logic
+            </Chip>
+            <Chip>
+              <Download className="size-3.5 text-slate-500" />
+              Export Ready
+            </Chip>
           </div>
         </div>
       </Card3D>

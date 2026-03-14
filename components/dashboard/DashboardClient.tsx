@@ -1,7 +1,7 @@
-// src/app/dashboard/DashboardClient.tsx
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import {
   CartesianGrid,
   Line,
@@ -50,7 +50,7 @@ type Kpi = {
 type SeriesPoint = {
   name: string;
   sales: number;
-  expenses: number;
+  expenses: number; // using credit notes / adjustments as real negative business movement
   invoices: number;
   cash: number;
 };
@@ -67,21 +67,118 @@ type DueRow = {
   lastInvoice: string;
 };
 
+type InvoiceRow = {
+  id: string;
+  invoice_no: string;
+  customer_id?: number | null;
+  customer_name?: string | null;
+  invoice_date?: string | null;
+  due_date?: string | null;
+  status?: string | null;
+  subtotal?: number | null;
+  vat_amount?: number | null;
+  total_amount?: number | null;
+  paid_amount?: number | null;
+  balance_amount?: number | null;
+  created_at?: string | null;
+};
+
+type QuotationRow = {
+  id: string;
+  quote_no: string;
+  customer_id?: number | null;
+  customer_name?: string | null;
+  quote_date?: string | null;
+  valid_until?: string | null;
+  status?: string | null;
+  subtotal?: number | null;
+  vat_amount?: number | null;
+  total_amount?: number | null;
+  created_at?: string | null;
+};
+
+type CreditNoteRow = {
+  id: string;
+  credit_no: string;
+  customer_id?: number | null;
+  customer_name?: string | null;
+  credit_date?: string | null;
+  status?: string | null;
+  subtotal?: number | null;
+  vat_amount?: number | null;
+  total_amount?: number | null;
+  created_at?: string | null;
+};
+
+type CustomerRow = {
+  id: string | number;
+  name?: string | null;
+};
+
+type SupplierRow = {
+  id: string | number;
+  name?: string | null;
+};
+
+type ApiListResponse<T> = {
+  ok: boolean;
+  data?: T[];
+  meta?: {
+    total?: number;
+    hasMore?: boolean;
+    page?: number;
+    pageSize?: number;
+  };
+  kpi?: any;
+  error?: any;
+};
+
+type MonthlyAccumulator = {
+  sales: number;
+  expenses: number;
+  invoices: number;
+  cash: number;
+};
+
+type CustomerDueAccumulator = {
+  customer: string;
+  totalDue: number;
+  overdue30: number;
+  overdue60: number;
+  overdue90: number;
+  lastInvoice: string;
+  lastInvoiceDateTs: number;
+};
+
 /* =========================
    Utils
 ========================= */
 
+function n2(v: any) {
+  const x = Number(v ?? 0);
+  return Number.isFinite(x) ? x : 0;
+}
+
 function money(n: number) {
-  return `Rs ${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `Rs ${n.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 function fmtLastSync(d: Date) {
-  // “Last Sync at 04 Mar 2026, 13:40 pm”
   const dd = d.toLocaleString(undefined, { day: "2-digit" });
   const mmm = d.toLocaleString(undefined, { month: "short" });
   const yyyy = d.toLocaleString(undefined, { year: "numeric" });
-  const hhmm = d.toLocaleString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
-  const ampm = d.toLocaleString(undefined, { hour: "numeric", hour12: true }).toLowerCase().includes("pm")
+  const hhmm = d.toLocaleString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const ampm = d
+    .toLocaleString(undefined, { hour: "numeric", hour12: true })
+    .toLowerCase()
+    .includes("pm")
     ? "pm"
     : "am";
   return `Last Sync at ${dd} ${mmm} ${yyyy}, ${hhmm} ${ampm}`;
@@ -97,6 +194,73 @@ function brandTone(a?: Accent) {
   if (a === "green") return "bg-emerald-500/10 text-emerald-700 ring-1 ring-emerald-500/20";
   if (a === "muted") return "bg-slate-100 text-slate-700 ring-1 ring-slate-200";
   return "bg-slate-50 text-slate-700 ring-1 ring-slate-200";
+}
+
+function safeDate(v?: string | null) {
+  if (!v) return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function isSameMonth(a: Date, b: Date) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
+}
+
+function monthKey(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthLabel(d: Date) {
+  return d.toLocaleString(undefined, { month: "short" });
+}
+
+function startOfMonth(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+
+function endOfMonth(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
+}
+
+function addMonths(d: Date, delta: number) {
+  return new Date(d.getFullYear(), d.getMonth() + delta, 1);
+}
+
+function isOverdueRow(inv: InvoiceRow) {
+  const balance = n2(inv.balance_amount);
+  const due = safeDate(inv.due_date);
+  if (!(balance > 0) || !due) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return due.getTime() < today.getTime();
+}
+
+function daysPastDue(inv: InvoiceRow) {
+  const balance = n2(inv.balance_amount);
+  const due = safeDate(inv.due_date);
+  if (!(balance > 0) || !due) return 0;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  due.setHours(0, 0, 0, 0);
+  const diffMs = today.getTime() - due.getTime();
+  if (diffMs <= 0) return 0;
+  return Math.floor(diffMs / (1000 * 60 * 60 * 24));
+}
+
+async function safeGet<T>(url: string): Promise<T> {
+  const res = await fetch(url, { cache: "no-store" });
+  const ct = res.headers.get("content-type") || "";
+  const text = await res.text();
+
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}: ${text.slice(0, 240)}`);
+  }
+
+  if (!ct.includes("application/json")) {
+    throw new Error(`Expected JSON. Got ${ct || "unknown"}`);
+  }
+
+  return JSON.parse(text) as T;
 }
 
 /* =========================
@@ -147,7 +311,7 @@ function FadeInCard({
       style={{ transitionDelay: `${delayMs}ms` }}
       className={cn(
         "transform-gpu transition-all duration-700 ease-out",
-        seen ? "opacity-100 translate-y-0" : "opacity-0 translate-y-3",
+        seen ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0",
         className
       )}
     >
@@ -182,7 +346,7 @@ function Card3D({
         "relative rounded-3xl bg-white",
         "shadow-[0_1px_0_rgba(15,23,42,0.08),0_18px_45px_rgba(15,23,42,0.10)]",
         "ring-1 ring-slate-200/80",
-        "transition-all duration-300 ease-out transform-gpu",
+        "transform-gpu transition-all duration-300 ease-out",
         "hover:-translate-y-0.5 hover:shadow-[0_1px_0_rgba(15,23,42,0.08),0_26px_70px_rgba(15,23,42,0.14)]",
         "before:pointer-events-none before:absolute before:inset-0 before:rounded-3xl before:opacity-90",
         glowCls,
@@ -225,11 +389,11 @@ function KpiTile({ kpi, delayMs = 0 }: { kpi: Kpi; delayMs?: number }) {
     <FadeInCard delayMs={delayMs} className="h-full">
       <Card3D
         glow={kpi.accent === "orange" ? "orange" : kpi.accent === "navy" ? "navy" : "neutral"}
-        className={cn("h-[178px] p-6", "flex flex-col justify-between")}
+        className="flex h-[178px] flex-col justify-between p-6"
       >
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-slate-800 leading-tight line-clamp-2">{kpi.label}</div>
+            <div className="line-clamp-2 text-sm font-semibold leading-tight text-slate-800">{kpi.label}</div>
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
@@ -240,27 +404,27 @@ function KpiTile({ kpi, delayMs = 0 }: { kpi: Kpi; delayMs?: number }) {
 
         <div className="mt-3 flex items-end justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-[30px] font-extrabold tracking-tight text-slate-900 leading-none">{kpi.value}</div>
+            <div className="text-[30px] font-extrabold leading-none tracking-tight text-slate-900">{kpi.value}</div>
           </div>
-          <div className="hidden sm:grid size-10 place-items-center rounded-2xl bg-slate-50 ring-1 ring-slate-200">
+          <div className="hidden size-10 place-items-center rounded-2xl bg-slate-50 ring-1 ring-slate-200 sm:grid">
             <Sparkles className="size-4 text-slate-500" />
           </div>
         </div>
 
-        <div className="mt-2 text-sm text-slate-600 line-clamp-2">{kpi.note || "\u00A0"}</div>
+        <div className="mt-2 line-clamp-2 text-sm text-slate-600">{kpi.note || "\u00A0"}</div>
       </Card3D>
     </FadeInCard>
   );
 }
 
 /* =========================
-   Tooltip (premium)
+   Tooltip
 ========================= */
 
 function PremiumTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="rounded-2xl bg-white/95 backdrop-blur-xl ring-1 ring-slate-200 shadow-[0_18px_55px_rgba(2,6,23,0.18)] px-3 py-2">
+    <div className="rounded-2xl bg-white/95 px-3 py-2 shadow-[0_18px_55px_rgba(2,6,23,0.18)] ring-1 ring-slate-200 backdrop-blur-xl">
       <div className="text-xs font-semibold text-slate-700">{label}</div>
       <div className="mt-1 space-y-1">
         {payload.map((p: any) => (
@@ -281,31 +445,17 @@ function PremiumTooltip({ active, payload, label }: any) {
 ========================= */
 
 export default function DashboardClient() {
+  const router = useRouter();
+
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
   const [lastSync, setLastSync] = React.useState<string>(fmtLastSync(new Date()));
-  const [seed, setSeed] = React.useState(7);
 
-  // IMPORTANT: Only company names you already used in screenshot set:
-  const COMPANY_NAMES = React.useMemo(
-    () => ["Abc Group Ltd", "MultiiMaint Ltd", "Dan & Shi Pest Control", "Heaven Academy"],
-    []
-  );
-
-  const totals = React.useMemo(() => {
-    const s = seed;
-    return {
-      revenueThisMonth: 4780 + s * 19,
-      outstanding: 94074 + s * 53,
-      expensesThisMonth: 7285 + s * 11,
-      overdue: 890 + s * 7,
-      newCustomers: 3,
-      issued: 36 + (s % 5),
-      paid: 29 + (s % 4),
-      partial: 8 + (s % 3),
-      overdueCount: 6 + (s % 4),
-    };
-  }, [seed]);
+  const [invoices, setInvoices] = React.useState<InvoiceRow[]>([]);
+  const [quotations, setQuotations] = React.useState<QuotationRow[]>([]);
+  const [creditNotes, setCreditNotes] = React.useState<CreditNoteRow[]>([]);
+  const [customers, setCustomers] = React.useState<CustomerRow[]>([]);
+  const [suppliers, setSuppliers] = React.useState<SupplierRow[]>([]);
 
   const [kpis, setKpis] = React.useState<Kpi[]>([]);
   const [series, setSeries] = React.useState<SeriesPoint[]>([]);
@@ -313,92 +463,337 @@ export default function DashboardClient() {
   const [statusSlices, setStatusSlices] = React.useState<StatusSlice[]>([]);
   const [dueRows, setDueRows] = React.useState<DueRow[]>([]);
 
-  React.useEffect(() => {
-    setKpis([
-      {
-        label: "Revenue (This Month)",
-        value: money(totals.revenueThisMonth),
-        note: "Month-to-date invoiced value.",
-        accent: "navy",
-        delta: `+${(2.4 + (seed % 4) * 0.7).toFixed(1)}%`,
-        trend: "up",
-      },
-      {
-        label: "Outstanding",
-        value: money(totals.outstanding),
-        note: "Open balances across issued & partial invoices.",
-        accent: "orange",
-        delta: `+${(1.3 + (seed % 3) * 0.6).toFixed(1)}%`,
-        trend: "up",
-      },
-      {
-        label: "Expenses (This Month)",
-        value: money(totals.expensesThisMonth),
-        note: "Operational spend recorded this month.",
-        accent: "muted",
-        delta: `-${(0.8 + (seed % 3) * 0.4).toFixed(1)}%`,
-        trend: "down",
-      },
-      {
-        label: "Overdue",
-        value: money(totals.overdue),
-        note: "Invoices past due date.",
-        accent: "orange",
-        delta: `+${(0.6 + (seed % 4) * 0.3).toFixed(1)}%`,
-        trend: "up",
-      },
-    
-    ]);
+  const now = React.useMemo(() => new Date(), []);
+  const currentMonthStart = React.useMemo(() => startOfMonth(now), [now]);
+  const previousMonthStart = React.useMemo(() => startOfMonth(addMonths(now, -1)), [now]);
+  const previousMonthEnd = React.useMemo(() => endOfMonth(addMonths(now, -1)), [now]);
 
-    const drift = (m: number) => Math.round((seed * m) / 3);
-    setSeries([
-      { name: "Jun", sales: 2100 + drift(8), expenses: 1180 + drift(4), invoices: 12 + (seed % 3), cash: 920 + drift(3) },
-      { name: "Jul", sales: 2900 + drift(10), expenses: 1620 + drift(5), invoices: 18 + (seed % 4), cash: 1450 + drift(4) },
-      { name: "Aug", sales: 1600 + drift(6), expenses: 1120 + drift(3), invoices: 10 + (seed % 3), cash: 720 + drift(2) },
-      { name: "Sep", sales: 720 + drift(3), expenses: 960 + drift(3), invoices: 7 + (seed % 2), cash: 360 + drift(1) },
-      { name: "Oct", sales: 3200 + drift(11), expenses: 1750 + drift(6), invoices: 21 + (seed % 5), cash: 1680 + drift(5) },
-      { name: "Nov", sales: 1300 + drift(5), expenses: 930 + drift(2), invoices: 9 + (seed % 3), cash: 560 + drift(2) },
-    ]);
+  const buildDashboard = React.useCallback(
+    (
+      invRows: InvoiceRow[],
+      quoRows: QuotationRow[],
+      crnRows: CreditNoteRow[],
+      customerRows: CustomerRow[],
+      supplierRows: SupplierRow[]
+    ) => {
+      const thisMonthInvoices = invRows.filter((x) => {
+        const d = safeDate(x.invoice_date ?? x.created_at);
+        return d ? isSameMonth(d, now) : false;
+      });
 
-    setAging([
-      { name: "0–15 days", value: 22025 + seed * 35 },
-      { name: "16–30 days", value: 15185 + seed * 28 },
-      { name: "31–60 days", value: 9466 + seed * 20 },
-      { name: "61–90 days", value: 5408 + seed * 14 },
-      { name: "90+ days", value: 3226 + seed * 9 },
-    ]);
+      const prevMonthInvoices = invRows.filter((x) => {
+        const d = safeDate(x.invoice_date ?? x.created_at);
+        return d ? d >= previousMonthStart && d <= previousMonthEnd : false;
+      });
 
-    setStatusSlices([
-      { name: "Paid", value: totals.paid },
-      { name: "Issued", value: totals.issued },
-      { name: "Partial", value: totals.partial },
-      { name: "Overdue", value: totals.overdueCount },
-    ]);
+      const thisMonthCredits = crnRows.filter((x) => {
+        const d = safeDate(x.credit_date ?? x.created_at);
+        return d ? isSameMonth(d, now) : false;
+      });
 
-    setDueRows([
-      { customer: COMPANY_NAMES[0], totalDue: 22597 + seed * 7, overdue30: 7263 + seed * 4, overdue60: 2128 + seed * 2, overdue90: 914 + seed, lastInvoice: "INV-2409" },
-      { customer: COMPANY_NAMES[1], totalDue: 13946 + seed * 6, overdue30: 4249 + seed * 3, overdue60: 1621 + seed, overdue90: 0, lastInvoice: "INV-2411" },
-      { customer: COMPANY_NAMES[2], totalDue: 9011 + seed * 5, overdue30: 1835 + seed * 2, overdue60: 0, overdue90: 0, lastInvoice: "INV-2410" },
-      { customer: COMPANY_NAMES[3], totalDue: 7497 + seed * 4, overdue30: 2228 + seed * 2, overdue60: 914 + seed, overdue90: 0, lastInvoice: "INV-2408" },
-    ]);
-  }, [seed, totals, COMPANY_NAMES]);
+      const prevMonthCredits = crnRows.filter((x) => {
+        const d = safeDate(x.credit_date ?? x.created_at);
+        return d ? d >= previousMonthStart && d <= previousMonthEnd : false;
+      });
 
-  async function refresh() {
+      const revenueThisMonth = thisMonthInvoices.reduce((s, x) => s + n2(x.total_amount), 0);
+      const revenuePrevMonth = prevMonthInvoices.reduce((s, x) => s + n2(x.total_amount), 0);
+
+      const outstanding = invRows.reduce((s, x) => s + n2(x.balance_amount), 0);
+      const outstandingPrevMonth = prevMonthInvoices.reduce((s, x) => s + n2(x.balance_amount), 0);
+
+      const adjustmentsThisMonth = thisMonthCredits.reduce((s, x) => s + n2(x.total_amount), 0);
+      const adjustmentsPrevMonth = prevMonthCredits.reduce((s, x) => s + n2(x.total_amount), 0);
+
+      const overdueValue = invRows
+        .filter((x) => isOverdueRow(x))
+        .reduce((s, x) => s + n2(x.balance_amount), 0);
+
+      const overdueValuePrevMonth = prevMonthInvoices
+        .filter((x) => isOverdueRow(x))
+        .reduce((s, x) => s + n2(x.balance_amount), 0);
+
+      const quotationPipeline = quoRows.reduce((s, x) => s + n2(x.total_amount), 0);
+      const quotationsThisMonth = quoRows.filter((x) => {
+        const d = safeDate(x.quote_date ?? x.created_at);
+        return d ? isSameMonth(d, now) : false;
+      }).length;
+
+      const vatThisMonth = thisMonthInvoices.reduce((s, x) => s + n2(x.vat_amount), 0);
+      const receivedThisMonth = thisMonthInvoices.reduce((s, x) => s + n2(x.paid_amount), 0);
+
+      function pctDelta(current: number, prev: number) {
+        if (prev <= 0 && current > 0) return { delta: "+100.0%", trend: "up" as const };
+        if (prev <= 0 && current <= 0) return { delta: "0.0%", trend: "flat" as const };
+        const pct = ((current - prev) / prev) * 100;
+        return {
+          delta: `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`,
+          trend: pct > 0 ? ("up" as const) : pct < 0 ? ("down" as const) : ("flat" as const),
+        };
+      }
+
+      const revenueDelta = pctDelta(revenueThisMonth, revenuePrevMonth);
+      const outstandingDelta = pctDelta(outstanding, outstandingPrevMonth);
+      const adjustmentsDelta = pctDelta(adjustmentsThisMonth, adjustmentsPrevMonth);
+      const overdueDelta = pctDelta(overdueValue, overdueValuePrevMonth);
+
+      setKpis([
+        {
+          label: "Revenue (This Month)",
+          value: money(revenueThisMonth),
+          note: `${thisMonthInvoices.length} invoice(s) issued this month.`,
+          accent: "navy",
+          delta: revenueDelta.delta,
+          trend: revenueDelta.trend,
+        },
+        {
+          label: "Outstanding",
+          value: money(outstanding),
+          note: "Open balances across all unpaid and partial invoices.",
+          accent: "orange",
+          delta: outstandingDelta.delta,
+          trend: outstandingDelta.trend,
+        },
+        {
+          label: "Credit Notes / Adjustments",
+          value: money(adjustmentsThisMonth),
+          note: `${thisMonthCredits.length} credit note(s) this month.`,
+          accent: "muted",
+          delta: adjustmentsDelta.delta,
+          trend: adjustmentsDelta.trend,
+        },
+        {
+          label: "Overdue",
+          value: money(overdueValue),
+          note: `${invRows.filter((x) => isOverdueRow(x)).length} overdue invoice(s).`,
+          accent: "orange",
+          delta: overdueDelta.delta,
+          trend: overdueDelta.trend,
+        },
+      ]);
+
+      const monthStarts = Array.from({ length: 6 }).map((_, i) => startOfMonth(addMonths(now, -5 + i)));
+
+      const seriesMap = new Map<string, MonthlyAccumulator>();
+      for (const m of monthStarts) {
+        seriesMap.set(monthKey(m), { sales: 0, expenses: 0, invoices: 0, cash: 0 });
+      }
+
+      for (const inv of invRows) {
+        const d = safeDate(inv.invoice_date ?? inv.created_at);
+        if (!d) continue;
+        const key = monthKey(startOfMonth(d));
+        const row = seriesMap.get(key);
+        if (!row) continue;
+        row.sales += n2(inv.total_amount);
+        row.cash += n2(inv.paid_amount);
+        row.invoices += 1;
+      }
+
+      for (const crn of crnRows) {
+        const d = safeDate(crn.credit_date ?? crn.created_at);
+        if (!d) continue;
+        const key = monthKey(startOfMonth(d));
+        const row = seriesMap.get(key);
+        if (!row) continue;
+        row.expenses += n2(crn.total_amount);
+      }
+
+      setSeries(
+        monthStarts.map((m) => {
+          const row = seriesMap.get(monthKey(m)) ?? { sales: 0, expenses: 0, invoices: 0, cash: 0 };
+          return {
+            name: monthLabel(m),
+            sales: row.sales,
+            expenses: row.expenses,
+            invoices: row.invoices,
+            cash: row.cash,
+          };
+        })
+      );
+
+      const agingBuckets: AgingBucket[] = [
+        { name: "0–15 days", value: 0 },
+        { name: "16–30 days", value: 0 },
+        { name: "31–60 days", value: 0 },
+        { name: "61–90 days", value: 0 },
+        { name: "90+ days", value: 0 },
+      ];
+
+      for (const inv of invRows) {
+        const bal = n2(inv.balance_amount);
+        if (bal <= 0) continue;
+        const days = daysPastDue(inv);
+
+        if (days <= 15) agingBuckets[0].value += bal;
+        else if (days <= 30) agingBuckets[1].value += bal;
+        else if (days <= 60) agingBuckets[2].value += bal;
+        else if (days <= 90) agingBuckets[3].value += bal;
+        else agingBuckets[4].value += bal;
+      }
+
+      setAging(agingBuckets);
+
+      const paidCount = invRows.filter((x) => String(x.status ?? "").toUpperCase() === "PAID").length;
+      const issuedCount = invRows.filter((x) => String(x.status ?? "").toUpperCase() === "ISSUED").length;
+      const partialCount = invRows.filter((x) => String(x.status ?? "").toUpperCase() === "PARTIALLY_PAID").length;
+      const overdueCount = invRows.filter((x) => isOverdueRow(x)).length;
+
+      setStatusSlices([
+        { name: "Paid", value: paidCount },
+        { name: "Issued", value: issuedCount },
+        { name: "Partial", value: partialCount },
+        { name: "Overdue", value: overdueCount },
+      ]);
+
+      const dueMap = new Map<string, CustomerDueAccumulator>();
+
+      for (const inv of invRows) {
+        const bal = n2(inv.balance_amount);
+        if (bal <= 0) continue;
+
+        const customer = inv.customer_name?.trim() || "Unknown Customer";
+        const days = daysPastDue(inv);
+        const invDate = safeDate(inv.invoice_date ?? inv.created_at);
+        const invTs = invDate ? invDate.getTime() : 0;
+
+        const current =
+          dueMap.get(customer) ??
+          {
+            customer,
+            totalDue: 0,
+            overdue30: 0,
+            overdue60: 0,
+            overdue90: 0,
+            lastInvoice: "—",
+            lastInvoiceDateTs: 0,
+          };
+
+        current.totalDue += bal;
+        if (days >= 30) current.overdue30 += bal;
+        if (days >= 60) current.overdue60 += bal;
+        if (days >= 90) current.overdue90 += bal;
+        if (invTs >= current.lastInvoiceDateTs) {
+          current.lastInvoiceDateTs = invTs;
+          current.lastInvoice = inv.invoice_no || "—";
+        }
+
+        dueMap.set(customer, current);
+      }
+
+      const sortedDue = Array.from(dueMap.values())
+        .sort((a, b) => b.totalDue - a.totalDue)
+        .slice(0, 8)
+        .map(({ lastInvoiceDateTs, ...rest }) => rest);
+
+      setDueRows(sortedDue);
+
+      const totalCustomers = customerRows.length;
+      const totalSuppliers = supplierRows.length;
+      const totalAging = agingBuckets.reduce((a, b) => a + b.value, 0);
+
+      // keep values available in UI by deriving from state inputs
+      // no return needed, but these help with notes elsewhere if you want later
+      void totalCustomers;
+      void totalSuppliers;
+      void totalAging;
+      void quotationPipeline;
+      void quotationsThisMonth;
+      void vatThisMonth;
+      void receivedThisMonth;
+    },
+    [now, previousMonthEnd, previousMonthStart]
+  );
+
+  const load = React.useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      await new Promise((r) => setTimeout(r, 380));
-      setSeed((s) => (s + 3) % 97);
+      const [inv, quo, crn, cus, sup] = await Promise.all([
+        safeGet<ApiListResponse<InvoiceRow>>("/api/invoices?page=1&pageSize=500"),
+        safeGet<ApiListResponse<QuotationRow>>("/api/quotations?page=1&pageSize=500"),
+        safeGet<ApiListResponse<CreditNoteRow>>("/api/credit-notes?page=1&pageSize=500"),
+        safeGet<ApiListResponse<CustomerRow>>("/api/customers"),
+        safeGet<ApiListResponse<SupplierRow>>("/api/suppliers?page=1&pageSize=500"),
+      ]);
+
+      const invRows = Array.isArray(inv.data) ? inv.data : [];
+      const quoRows = Array.isArray(quo.data) ? quo.data : [];
+      const crnRows = Array.isArray(crn.data) ? crn.data : [];
+      const customerRows = Array.isArray(cus.data) ? cus.data : [];
+      const supplierRows = Array.isArray(sup.data) ? sup.data : [];
+
+      setInvoices(invRows);
+      setQuotations(quoRows);
+      setCreditNotes(crnRows);
+      setCustomers(customerRows);
+      setSuppliers(supplierRows);
+
+      buildDashboard(invRows, quoRows, crnRows, customerRows, supplierRows);
       setLastSync(fmtLastSync(new Date()));
     } catch (e: any) {
       setError(e?.message || "Failed to refresh");
+      setInvoices([]);
+      setQuotations([]);
+      setCreditNotes([]);
+      setCustomers([]);
+      setSuppliers([]);
+      setKpis([]);
+      setSeries([]);
+      setAging([]);
+      setStatusSlices([]);
+      setDueRows([]);
     } finally {
       setLoading(false);
     }
-  }
+  }, [buildDashboard]);
 
-  const totalAging = aging.reduce((a, b) => a + b.value, 0);
+  React.useEffect(() => {
+    void load();
+  }, [load]);
+
+  const totalAging = React.useMemo(() => aging.reduce((a, b) => a + b.value, 0), [aging]);
+
   const pieColors = ["#071b38", "#ff7a18", "#64748b", "#0ea5e9", "#22c55e"];
+
+  const revenueThisMonth = React.useMemo(() => {
+    return invoices
+      .filter((x) => {
+        const d = safeDate(x.invoice_date ?? x.created_at);
+        return d ? d >= currentMonthStart : false;
+      })
+      .reduce((s, x) => s + n2(x.total_amount), 0);
+  }, [invoices, currentMonthStart]);
+
+  const quotationPipeline = React.useMemo(
+    () => quotations.reduce((s, x) => s + n2(x.total_amount), 0),
+    [quotations]
+  );
+
+  const creditNoteValue = React.useMemo(
+    () => creditNotes.reduce((s, x) => s + n2(x.total_amount), 0),
+    [creditNotes]
+  );
+
+  const collections = React.useMemo(
+    () => invoices.reduce((s, x) => s + n2(x.paid_amount), 0),
+    [invoices]
+  );
+
+  const outstanding = React.useMemo(
+    () => invoices.reduce((s, x) => s + n2(x.balance_amount), 0),
+    [invoices]
+  );
+
+  const issuedCount = React.useMemo(
+    () => invoices.filter((x) => String(x.status ?? "").toUpperCase() === "ISSUED").length,
+    [invoices]
+  );
+
+  const overdueCount = React.useMemo(
+    () => invoices.filter((x) => isOverdueRow(x)).length,
+    [invoices]
+  );
 
   return (
     <>
@@ -415,14 +810,17 @@ export default function DashboardClient() {
         }
       `}</style>
 
-      {/* ✅ NO BLANK SPACES: use tight gaps everywhere */}
       <div className="space-y-3">
-        {/* Header row (NO big blue band) */}
+        {/* Header */}
         <FadeInCard>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <div className="text-[22px] sm:text-[26px] font-extrabold tracking-tight text-slate-900">Dashboard</div>
-              <div className="mt-0.5 text-sm text-slate-600">Overview for invoices, cash flow, and performance.</div>
+              <div className="text-[22px] font-extrabold tracking-tight text-slate-900 sm:text-[26px]">
+                Dashboard
+              </div>
+              <div className="mt-0.5 text-sm text-slate-600">
+                Live overview for invoices, collections, quotations, VAT and receivables.
+              </div>
             </div>
 
             <div className="flex flex-col items-stretch gap-2 sm:items-end">
@@ -431,8 +829,8 @@ export default function DashboardClient() {
                   {lastSync}
                 </span>
                 <Button
-                  onClick={refresh}
-                  className="rounded-2xl bg-[#ff7a18] text-white hover:bg-[#ff6a00] shadow-[0_18px_44px_rgba(255,122,24,0.22)]"
+                  onClick={() => void load()}
+                  className="rounded-2xl bg-[#ff7a18] text-white shadow-[0_18px_44px_rgba(255,122,24,0.22)] hover:bg-[#ff6a00]"
                   disabled={loading}
                 >
                   <RefreshCw className={cn("mr-2 size-4", loading && "animate-spin")} />
@@ -452,7 +850,7 @@ export default function DashboardClient() {
         ) : null}
 
         {/* KPI tiles */}
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4 items-stretch">
+        <div className="grid grid-cols-1 items-stretch gap-3 md:grid-cols-2 xl:grid-cols-4">
           {kpis.map((k, i) => (
             <div key={k.label} className="h-full">
               <KpiTile kpi={k} delayMs={i * 55} />
@@ -460,15 +858,18 @@ export default function DashboardClient() {
           ))}
         </div>
 
-        {/* Charts row (tight) */}
-        <div className="grid grid-cols-1 gap-3 xl:grid-cols-3 items-stretch">
-          {/* Left: main chart */}
-          <FadeInCard delayMs={60} className="xl:col-span-2 h-full">
-            <Card3D glow="navy" className="p-5 h-full">
+        {/* Charts row */}
+        <div className="grid grid-cols-1 items-stretch gap-3 xl:grid-cols-3">
+          <FadeInCard delayMs={60} className="h-full xl:col-span-2">
+            <Card3D glow="navy" className="h-full p-5">
               <div className="flex items-end justify-between gap-3">
                 <div>
-                  <div className="text-sm font-semibold text-slate-900">Revenue & Expenses (Last 6 months)</div>
-                  <div className="mt-1 text-sm text-slate-600">Trend + cash overlay — dynamic enterprise insights.</div>
+                  <div className="text-sm font-semibold text-slate-900">
+                    Revenue, Adjustments & Cash (Last 6 months)
+                  </div>
+                  <div className="mt-1 text-sm text-slate-600">
+                    Real invoice totals, real credit notes, and real cash received.
+                  </div>
                 </div>
                 <div className="text-xs font-semibold text-slate-500">MUR</div>
               </div>
@@ -506,7 +907,7 @@ export default function DashboardClient() {
                     <Line
                       type="monotone"
                       dataKey="expenses"
-                      name="Expenses"
+                      name="Adjustments"
                       stroke="#64748b"
                       strokeWidth={2.5}
                       dot={false}
@@ -536,7 +937,7 @@ export default function DashboardClient() {
                   </div>
                 </div>
                 <div className="rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-200">
-                  <div className="text-xs font-semibold text-slate-600">Avg. Expenses</div>
+                  <div className="text-xs font-semibold text-slate-600">Avg. Adjustments</div>
                   <div className="mt-1 text-sm font-extrabold text-slate-900">
                     {money(series.reduce((a, b) => a + b.expenses, 0) / Math.max(1, series.length))}
                   </div>
@@ -557,12 +958,11 @@ export default function DashboardClient() {
             </Card3D>
           </FadeInCard>
 
-          {/* Right: stacked widgets (tight) */}
-          <div className="grid gap-3 h-full">
+          <div className="grid h-full gap-3">
             <FadeInCard delayMs={90} className="h-full">
               <Card3D glow="orange" className="p-5">
                 <div className="text-sm font-semibold text-slate-900">Invoice Status</div>
-                <div className="mt-1 text-sm text-slate-600">Operational breakdown (count).</div>
+                <div className="mt-1 text-sm text-slate-600">Live operational breakdown from invoice records.</div>
 
                 <div className="mt-3 h-[200px]">
                   <ResponsiveContainer width="100%" height="100%">
@@ -590,11 +990,11 @@ export default function DashboardClient() {
                 <div className="mt-2 grid grid-cols-2 gap-2">
                   <div className="rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-200">
                     <div className="text-xs font-semibold text-slate-600">Overdue (count)</div>
-                    <div className="mt-1 text-sm font-extrabold text-slate-900">{totals.overdueCount}</div>
+                    <div className="mt-1 text-sm font-extrabold text-slate-900">{overdueCount}</div>
                   </div>
                   <div className="rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-200">
-                    <div className="text-xs font-semibold text-slate-600">Partial (count)</div>
-                    <div className="mt-1 text-sm font-extrabold text-slate-900">{totals.partial}</div>
+                    <div className="text-xs font-semibold text-slate-600">Issued (count)</div>
+                    <div className="mt-1 text-sm font-extrabold text-slate-900">{issuedCount}</div>
                   </div>
                 </div>
               </Card3D>
@@ -603,7 +1003,7 @@ export default function DashboardClient() {
             <FadeInCard delayMs={120} className="h-full">
               <Card3D glow="neutral" className="p-5">
                 <div className="text-sm font-semibold text-slate-900">Invoices & Cash</div>
-                <div className="mt-1 text-sm text-slate-600">Monthly volume vs cash received.</div>
+                <div className="mt-1 text-sm text-slate-600">Monthly invoice volume against cash received.</div>
 
                 <div className="mt-3 h-[210px]">
                   <ResponsiveContainer width="100%" height="100%">
@@ -633,21 +1033,21 @@ export default function DashboardClient() {
                 </div>
 
                 <div className="mt-2 text-xs text-slate-500">
-                  Enterprise tip: Monitor collections vs invoice issuance.
+                  Collections are calculated from real invoice paid amounts.
                 </div>
               </Card3D>
             </FadeInCard>
           </div>
         </div>
 
-        {/* Bottom row: Aging + Quick Actions (tight) */}
-        <div className="grid grid-cols-1 gap-3 xl:grid-cols-3 items-stretch">
-          <FadeInCard delayMs={140} className="xl:col-span-2 h-full">
-            <Card3D glow="navy" className="p-5 h-full">
+        {/* Bottom row */}
+        <div className="grid grid-cols-1 items-stretch gap-3 xl:grid-cols-3">
+          <FadeInCard delayMs={140} className="h-full xl:col-span-2">
+            <Card3D glow="navy" className="h-full p-5">
               <div className="flex items-end justify-between gap-3">
                 <div>
                   <div className="text-sm font-semibold text-slate-900">Receivables Aging</div>
-                  <div className="mt-1 text-sm text-slate-600">Outstanding amounts by aging bucket.</div>
+                  <div className="mt-1 text-sm text-slate-600">Outstanding balances by aging bucket.</div>
                 </div>
                 <div className="text-xs font-semibold text-slate-500">{money(totalAging)} total</div>
               </div>
@@ -704,28 +1104,43 @@ export default function DashboardClient() {
           </FadeInCard>
 
           <FadeInCard delayMs={170} className="h-full">
-            <Card3D glow="orange" className="p-5 h-full">
+            <Card3D glow="orange" className="h-full p-5">
               <div className="text-sm font-semibold text-slate-900">Quick Actions</div>
-              <div className="mt-1 text-sm text-slate-600">One-click enterprise shortcuts.</div>
+              <div className="mt-1 text-sm text-slate-600">Fast access to the most-used workflows.</div>
 
               <div className="mt-3 grid gap-2">
-                <Button className="w-full rounded-2xl bg-[#071b38] text-white hover:bg-[#06142b] shadow-[0_14px_40px_rgba(7,27,56,0.18)]">
+                <Button
+                  className="w-full rounded-2xl bg-[#071b38] text-white shadow-[0_14px_40px_rgba(7,27,56,0.18)] hover:bg-[#06142b]"
+                  onClick={() => router.push("/sales/invoices/new")}
+                >
                   <FileText className="mr-2 size-4" />
                   New Invoice
                 </Button>
-                <Button variant="outline" className="w-full rounded-2xl">
+
+                <Button variant="outline" className="w-full rounded-2xl" onClick={() => router.push("/contacts")}>
                   <Users className="mr-2 size-4" />
                   New Customer
                 </Button>
-                <Button variant="outline" className="w-full rounded-2xl">
+
+                <Button variant="outline" className="w-full rounded-2xl" onClick={() => router.push("/reports/vat")}>
                   <BadgePercent className="mr-2 size-4" />
                   VAT Report
                 </Button>
-                <Button variant="outline" className="w-full rounded-2xl">
+
+                <Button
+                  variant="outline"
+                  className="w-full rounded-2xl"
+                  onClick={() => router.push("/sales/invoices")}
+                >
                   <CreditCard className="mr-2 size-4" />
                   Record Payment
                 </Button>
-                <Button variant="outline" className="w-full rounded-2xl">
+
+                <Button
+                  variant="outline"
+                  className="w-full rounded-2xl"
+                  onClick={() => router.push("/reports/soa")}
+                >
                   <Clock className="mr-2 size-4" />
                   Overdue List
                 </Button>
@@ -733,26 +1148,45 @@ export default function DashboardClient() {
 
               <div className="mt-3 rounded-2xl bg-[#ff7a18]/10 p-3 ring-1 ring-[#ff7a18]/20">
                 <div className="flex items-center justify-between">
-                  <div className="text-xs font-semibold text-[#c25708]">Action Hint</div>
+                  <div className="text-xs font-semibold text-[#c25708]">Live Insight</div>
                   <Sparkles className="size-4 text-[#c25708]" />
                 </div>
                 <div className="mt-1 text-xs text-[#8a3f06]">
-                  Review <span className="font-semibold">90+ days</span> weekly to keep collections tight.
+                  Revenue this month is <span className="font-semibold">{money(revenueThisMonth)}</span>. Quotation pipeline is{" "}
+                  <span className="font-semibold">{money(quotationPipeline)}</span>.
+                </div>
+              </div>
+
+              <div className="mt-3 rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-200">
+                <div className="text-xs font-semibold text-slate-700">Master Data</div>
+                <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-600">
+                  <div className="rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200">
+                    Customers: <span className="font-extrabold text-slate-900">{customers.length}</span>
+                  </div>
+                  <div className="rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200">
+                    Suppliers: <span className="font-extrabold text-slate-900">{suppliers.length}</span>
+                  </div>
+                  <div className="rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200">
+                    Quotations: <span className="font-extrabold text-slate-900">{quotations.length}</span>
+                  </div>
+                  <div className="rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200">
+                    Credit Notes: <span className="font-extrabold text-slate-900">{creditNotes.length}</span>
+                  </div>
                 </div>
               </div>
             </Card3D>
           </FadeInCard>
         </div>
 
-        {/* Due table (tight) */}
+        {/* Due table */}
         <FadeInCard delayMs={200}>
           <Card3D glow="neutral" className="p-5">
             <div className="flex items-end justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold text-slate-900">Invoice Due Details (by Customer)</div>
-                <div className="mt-1 text-sm text-slate-600">Overdue segmentation — 30/60/90+ days.</div>
+                <div className="mt-1 text-sm text-slate-600">Top customer exposures with 30/60/90+ day split.</div>
               </div>
-              <div className="text-xs text-slate-500">Live demo data</div>
+              <div className="text-xs text-slate-500">Real data</div>
             </div>
 
             <div className="mt-3 overflow-hidden rounded-2xl ring-1 ring-slate-200">
@@ -765,22 +1199,43 @@ export default function DashboardClient() {
               </div>
 
               <div className="divide-y divide-slate-200">
-                {dueRows.map((r, i) => (
-                  <div
-                    key={r.customer}
-                    className={cn("grid grid-cols-12 px-4 py-3 text-sm transition-colors hover:bg-slate-50")}
-                    style={{ animation: `floatIn 650ms ease ${(i * 55) / 1000}s both` }}
-                  >
-                    <div className="col-span-4">
-                      <div className="font-semibold text-slate-900">{r.customer}</div>
-                      <div className="text-xs text-slate-500">Last invoice: {r.lastInvoice}</div>
-                    </div>
-                    <div className="col-span-2 text-right font-semibold text-slate-900">{money(r.totalDue)}</div>
-                    <div className="col-span-2 text-right text-slate-800">{money(r.overdue30)}</div>
-                    <div className="col-span-2 text-right text-slate-800">{money(r.overdue60)}</div>
-                    <div className="col-span-2 text-right text-slate-800">{money(r.overdue90)}</div>
+                {dueRows.length === 0 ? (
+                  <div className="px-4 py-10 text-center text-sm text-slate-500">
+                    No outstanding customer balances found.
                   </div>
-                ))}
+                ) : (
+                  dueRows.map((r, i) => (
+                    <div
+                      key={`${r.customer}-${i}`}
+                      className="grid grid-cols-12 px-4 py-3 text-sm transition-colors hover:bg-slate-50"
+                      style={{ animation: `floatIn 650ms ease ${(i * 55) / 1000}s both` }}
+                    >
+                      <div className="col-span-4">
+                        <div className="font-semibold text-slate-900">{r.customer}</div>
+                        <div className="text-xs text-slate-500">Last invoice: {r.lastInvoice}</div>
+                      </div>
+                      <div className="col-span-2 text-right font-semibold text-slate-900">{money(r.totalDue)}</div>
+                      <div className="col-span-2 text-right text-slate-800">{money(r.overdue30)}</div>
+                      <div className="col-span-2 text-right text-slate-800">{money(r.overdue60)}</div>
+                      <div className="col-span-2 text-right text-slate-800">{money(r.overdue90)}</div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+              <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
+                <div className="text-xs font-semibold text-slate-500">Total Sales</div>
+                <div className="mt-1 text-lg font-extrabold text-slate-900">{money(invoices.reduce((s, x) => s + n2(x.total_amount), 0))}</div>
+              </div>
+              <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
+                <div className="text-xs font-semibold text-slate-500">Collections</div>
+                <div className="mt-1 text-lg font-extrabold text-slate-900">{money(collections)}</div>
+              </div>
+              <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
+                <div className="text-xs font-semibold text-slate-500">Credit Notes</div>
+                <div className="mt-1 text-lg font-extrabold text-slate-900">{money(creditNoteValue)}</div>
               </div>
             </div>
           </Card3D>

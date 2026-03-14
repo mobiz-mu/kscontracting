@@ -1,8 +1,8 @@
-// app/(app)/sales/credit-notes/page.tsx
 "use client";
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowUpRight,
   FileText,
@@ -17,6 +17,11 @@ import {
   AlertTriangle,
   BadgeCheck,
   Clock3,
+  MoreHorizontal,
+  Download,
+  Printer,
+  MessageCircle,
+  CheckCircle2,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -32,20 +37,27 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 /* =========================================
-   Types (matches /api/credit-notes GET)
+   Types
 ========================================= */
 
 type CreditNoteRow = {
-  id: number | string;
-  credit_note_number: string;
-  customer_id: number;
-  customer_name: string | null;
-  credit_note_date: string | null;
-  status: string;
-  total_amount: number | null;
-  created_at: string | null;
+  id: string;
+  credit_no?: string;
+  credit_note_number?: string;
+  customer_id?: number | null;
+  customer_name?: string | null;
+  credit_date?: string | null;
+  credit_note_date?: string | null;
+  site_address?: string | null;
+  subtotal?: number | null;
+  vat?: number | null;
+  total_amount?: number | null;
+  status?: string | null;
+  created_at?: string | null;
+  issued_at?: string | null;
   invoice_id?: number | string | null;
   reason?: string | null;
+  notes?: string | null;
 };
 
 type CreditNotesResponse = {
@@ -56,11 +68,6 @@ type CreditNotesResponse = {
     pageSize: number;
     total: number;
     hasMore: boolean;
-  };
-  kpi?: {
-    totalCreditNotes: number;
-    totalValue: number;
-    byStatus: Record<string, number>;
   };
   error?: any;
   supabaseError?: any;
@@ -77,7 +84,10 @@ function n2(v: any) {
 
 function money(v: any) {
   const n = n2(v);
-  return `Rs ${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `Rs ${n.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 function fmtDate(v?: string | null) {
@@ -89,6 +99,20 @@ function fmtDate(v?: string | null) {
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
+}
+
+function safeId(id: any) {
+  const s = String(id ?? "").trim();
+  if (!s || s === "undefined" || s === "null") return "";
+  return s;
+}
+
+function getCreditNo(r: CreditNoteRow) {
+  return r.credit_no || r.credit_note_number || "—";
+}
+
+function getCreditDate(r: CreditNoteRow) {
+  return r.credit_date || r.credit_note_date || null;
 }
 
 async function safeGet<T>(url: string): Promise<T> {
@@ -121,7 +145,7 @@ function useDebounced<T>(value: T, ms = 350) {
   return v;
 }
 
-function statusTone(st?: string) {
+function statusTone(st?: string | null) {
   const s = String(st || "").toUpperCase();
   if (s === "APPLIED") return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200";
   if (s === "ISSUED") return "bg-blue-50 text-blue-700 ring-1 ring-blue-200";
@@ -129,11 +153,42 @@ function statusTone(st?: string) {
   return "bg-slate-50 text-slate-700 ring-1 ring-slate-200";
 }
 
+function exportCsv(filename: string, head: string[], rows: (string | number)[][]) {
+  const csv =
+    [head, ...rows]
+      .map((row) =>
+        row
+          .map((c) => {
+            const s = String(c ?? "");
+            const needs = s.includes(",") || s.includes('"') || s.includes("\n");
+            return needs ? `"${s.replaceAll('"', '""')}"` : s;
+          })
+          .join(",")
+      )
+      .join("\n") + "\n";
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 /* =========================================
    UI atoms
 ========================================= */
 
-function Chip({ children, className }: { children: React.ReactNode; className?: string }) {
+function Chip({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
     <span
       className={cn(
@@ -147,7 +202,13 @@ function Chip({ children, className }: { children: React.ReactNode; className?: 
   );
 }
 
-function Card3D({ children, className }: { children: React.ReactNode; className?: string }) {
+function Card3D({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
     <div
       className={cn(
@@ -203,34 +264,35 @@ function KPICard({
    Page
 ========================================= */
 
-const STATUS_OPTIONS = ["ALL", "ISSUED", "APPLIED", "VOID"] as const;
+const STATUS_OPTIONS = ["ALL", "DRAFT", "ISSUED", "APPLIED", "VOID"] as const;
 type StatusFilter = (typeof STATUS_OPTIONS)[number];
 
 export default function CreditNotesPage() {
+  const router = useRouter();
+
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState("");
 
   const [rows, setRows] = React.useState<CreditNoteRow[]>([]);
   const [meta, setMeta] = React.useState<CreditNotesResponse["meta"] | null>(null);
-  const [kpi, setKpi] = React.useState<CreditNotesResponse["kpi"] | null>(null);
 
   const [q, setQ] = React.useState("");
   const qd = useDebounced(q, 350);
 
   const [status, setStatus] = React.useState<StatusFilter>("ALL");
   const [page, setPage] = React.useState(1);
-  const [pageSize] = React.useState(25);
+  const pageSize = 25;
 
   const [refreshTick, setRefreshTick] = React.useState(0);
 
-  async function load() {
+  async function load(p = page) {
     setLoading(true);
     setErr("");
     try {
       const params = new URLSearchParams();
       if (qd.trim()) params.set("q", qd.trim());
-      if (status) params.set("status", status);
-      params.set("page", String(page));
+      params.set("status", status);
+      params.set("page", String(p));
       params.set("pageSize", String(pageSize));
 
       const res = await safeGet<CreditNotesResponse>(`/api/credit-notes?${params.toString()}`);
@@ -238,34 +300,93 @@ export default function CreditNotesPage() {
 
       setRows(Array.isArray(res.data) ? res.data : []);
       setMeta(res.meta ?? null);
-      setKpi(res.kpi ?? null);
     } catch (e: any) {
       setErr(e?.message || "Failed to load credit notes");
       setRows([]);
       setMeta(null);
-      setKpi(null);
     } finally {
       setLoading(false);
     }
   }
 
   React.useEffect(() => {
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qd, status, page, pageSize, refreshTick]);
-
-  React.useEffect(() => {
     setPage(1);
+    void load(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qd, status]);
 
-  const hasMore = meta?.hasMore ?? (rows.length === pageSize);
+  React.useEffect(() => {
+    void load(page);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, refreshTick]);
+
+  const hasMore = meta?.hasMore ?? rows.length === pageSize;
   const totalCount = meta?.total ?? rows.length;
 
-  const statusCounts = kpi?.byStatus ?? {};
-  const issued = statusCounts["ISSUED"] ?? 0;
-  const applied = statusCounts["APPLIED"] ?? 0;
-  const voided = statusCounts["VOID"] ?? 0;
+  const filteredStats = React.useMemo(() => {
+    const totalValue = rows.reduce((s, r) => s + n2(r.total_amount), 0);
+    const subtotalValue = rows.reduce((s, r) => s + n2(r.subtotal), 0);
+    const vatValue = rows.reduce((s, r) => s + n2(r.vat), 0);
+
+    const drafts = rows.filter((r) => String(r.status).toUpperCase() === "DRAFT").length;
+    const issued = rows.filter((r) => String(r.status).toUpperCase() === "ISSUED").length;
+    const applied = rows.filter((r) => String(r.status).toUpperCase() === "APPLIED").length;
+    const voided = rows.filter((r) => String(r.status).toUpperCase() === "VOID").length;
+
+    return {
+      totalValue,
+      subtotalValue,
+      vatValue,
+      drafts,
+      issued,
+      applied,
+      voided,
+    };
+  }, [rows]);
+
+  function exportCurrentCsv() {
+    const head = [
+      "Credit Note No",
+      "Customer",
+      "Date",
+      "Subtotal",
+      "VAT",
+      "Total",
+      "Status",
+      "Reason",
+    ];
+
+    const body = rows.map((r) => [
+      getCreditNo(r),
+      r.customer_name || "—",
+      fmtDate(getCreditDate(r)),
+      n2(r.subtotal).toFixed(2),
+      n2(r.vat).toFixed(2),
+      n2(r.total_amount).toFixed(2),
+      r.status || "—",
+      r.reason || "",
+    ]);
+
+    exportCsv("credit-notes-register.csv", head, body);
+  }
+
+  function sendWhatsApp(id: string, creditNo: string, customerName: string | null) {
+    const base = typeof window !== "undefined" ? window.location.origin : "";
+    const printUrl = `${base}/sales/credit-notes/${encodeURIComponent(id)}/print`;
+
+    const text = [
+      `Dear ${customerName || "Customer"},`,
+      ``,
+      `Please find your credit note ${creditNo}.`,
+      `You can view / print it here:`,
+      `${printUrl}`,
+      ``,
+      `KS Contracting Ltd`,
+    ].join("\n");
+
+    const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    window.open(waUrl, "_blank", "noopener,noreferrer");
+  }
 
   return (
     <div className="space-y-4">
@@ -273,7 +394,7 @@ export default function CreditNotesPage() {
       <div className="relative overflow-hidden rounded-3xl ring-1 ring-slate-200 bg-white">
         <div className="absolute inset-0 bg-[radial-gradient(900px_460px_at_12%_-20%,rgba(7,27,56,0.14),transparent_60%),radial-gradient(700px_420px_at_110%_-10%,rgba(255,122,24,0.14),transparent_60%),linear-gradient(180deg,rgba(248,250,252,1),rgba(255,255,255,1))]" />
         <div className="relative px-5 py-4 sm:px-7 sm:py-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <Chip>
@@ -291,10 +412,11 @@ export default function CreditNotesPage() {
               </div>
 
               <h1 className="mt-2 text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
-                Credit Notes
+                Credit Notes Register
               </h1>
               <div className="mt-1 text-sm text-slate-600">
-                Live from Supabase — search, filter, and print with enterprise-grade UI.
+                Ultra-premium enterprise credit note workspace with live figures, search, print, WhatsApp share,
+                and customer visibility.
               </div>
             </div>
 
@@ -304,10 +426,19 @@ export default function CreditNotesPage() {
                 className="rounded-2xl h-11 bg-white/70 shadow-sm hover:bg-white"
                 onClick={() => setRefreshTick((x) => x + 1)}
                 disabled={loading}
-                title="Refresh"
               >
                 <RefreshCw className={cn("mr-2 size-4", loading && "animate-spin")} />
                 Refresh
+              </Button>
+
+              <Button
+                variant="outline"
+                className="rounded-2xl h-11 bg-white/70 shadow-sm hover:bg-white"
+                onClick={exportCurrentCsv}
+                disabled={rows.length === 0}
+              >
+                <Download className="mr-2 size-4" />
+                Export CSV
               </Button>
 
               <Link href="/sales/credit-notes/new">
@@ -326,7 +457,7 @@ export default function CreditNotesPage() {
               <Input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Search credit note no or customer name…"
+                placeholder="Search credit note no or customer name..."
                 className="h-11 rounded-2xl pl-10"
               />
             </div>
@@ -339,7 +470,10 @@ export default function CreditNotesPage() {
 
               {STATUS_OPTIONS.map((s) => {
                 const active = status === s;
-                const count = s === "ALL" ? totalCount : statusCounts[String(s).toUpperCase()] ?? 0;
+                const count =
+                  s === "ALL"
+                    ? totalCount
+                    : rows.filter((r) => String(r.status).toUpperCase() === s).length;
 
                 return (
                   <button
@@ -369,44 +503,65 @@ export default function CreditNotesPage() {
       </div>
 
       {/* KPI */}
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
         <KPICard
           icon={FileText}
-          label="Total credit notes"
-          value={String(kpi?.totalCreditNotes ?? (loading ? "…" : rows.length))}
-          sub={`Issued ${issued} • Applied ${applied} • Void ${voided}`}
+          label="Credit Note Count"
+          value={String(totalCount)}
+          sub={`Draft ${filteredStats.drafts} • Issued ${filteredStats.issued}`}
           tone="blue"
         />
         <KPICard
           icon={CircleDollarSign}
-          label="Total value"
-          value={money(kpi?.totalValue ?? 0)}
+          label="Gross Credit Value"
+          value={money(filteredStats.totalValue)}
           sub="All listed credit notes"
           tone="emerald"
         />
         <KPICard
           icon={Clock3}
-          label="Issued"
-          value={String(issued)}
-          sub="Created & active"
+          label="Applied"
+          value={String(filteredStats.applied)}
+          sub="Applied to customer balance"
           tone="orange"
         />
         <KPICard
           icon={AlertTriangle}
           label="Voided"
-          value={String(voided)}
+          value={String(filteredStats.voided)}
           sub="Cancelled credit notes"
           tone="rose"
         />
       </div>
 
-      {/* Table */}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <KPICard
+          icon={CheckCircle2}
+          label="Subtotal"
+          value={money(filteredStats.subtotalValue)}
+          sub="Before VAT"
+        />
+        <KPICard
+          icon={BadgeCheck}
+          label="VAT"
+          value={money(filteredStats.vatValue)}
+          sub="Tax component"
+        />
+        <KPICard
+          icon={CircleDollarSign}
+          label="Average Credit Note"
+          value={money(rows.length ? filteredStats.totalValue / rows.length : 0)}
+          sub="Average document value"
+        />
+      </div>
+
+      {/* Premium table */}
       <Card3D className="p-0">
         <div className="flex items-center justify-between gap-2 px-5 py-4">
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-slate-900">Credit note list</div>
+            <div className="text-sm font-semibold text-slate-900">Premium Credit Note Table</div>
             <div className="mt-0.5 text-xs text-slate-600">
-              Click a row to open details. Use actions to print.
+              Real customer names, printable documents, linked invoice access, and WhatsApp share.
             </div>
           </div>
 
@@ -417,15 +572,18 @@ export default function CreditNotesPage() {
 
         <div className="overflow-hidden rounded-b-3xl border-t border-slate-200">
           <div className="overflow-auto">
-            <table className="w-full min-w-[980px] text-sm">
+            <table className="w-full min-w-[1300px] text-sm">
               <thead className="bg-slate-50 text-slate-600">
                 <tr className="[&>th]:px-5 [&>th]:py-3 [&>th]:text-left [&>th]:font-semibold">
-                  <th className="w-[210px]">Credit Note</th>
-                  <th>Customer</th>
+                  <th className="w-[200px]">Credit Note</th>
+                  <th className="w-[260px]">Customer</th>
                   <th className="w-[140px]">Date</th>
-                  <th className="w-[160px]">Invoice</th>
-                  <th className="w-[160px] text-right">Total</th>
+                  <th className="w-[140px] text-right">Subtotal</th>
+                  <th className="w-[120px] text-right">VAT</th>
+                  <th className="w-[150px] text-right">Total</th>
+                  <th className="w-[150px]">Linked Invoice</th>
                   <th className="w-[140px]">Status</th>
+                  <th className="w-[320px]">Quick Actions</th>
                   <th className="w-[64px] text-right"> </th>
                 </tr>
               </thead>
@@ -434,32 +592,21 @@ export default function CreditNotesPage() {
                 {loading ? (
                   Array.from({ length: 8 }).map((_, i) => (
                     <tr key={i} className="animate-pulse">
-                      <td className="px-5 py-4">
-                        <div className="h-4 w-32 rounded bg-slate-200" />
-                      </td>
-                      <td className="px-5 py-4">
-                        <div className="h-4 w-40 rounded bg-slate-200" />
-                      </td>
-                      <td className="px-5 py-4">
-                        <div className="h-4 w-20 rounded bg-slate-200" />
-                      </td>
-                      <td className="px-5 py-4">
-                        <div className="h-4 w-28 rounded bg-slate-200" />
-                      </td>
-                      <td className="px-5 py-4 text-right">
-                        <div className="ml-auto h-4 w-24 rounded bg-slate-200" />
-                      </td>
-                      <td className="px-5 py-4">
-                        <div className="h-6 w-24 rounded-full bg-slate-200" />
-                      </td>
-                      <td className="px-5 py-4 text-right">
-                        <div className="ml-auto h-8 w-8 rounded-2xl bg-slate-200" />
-                      </td>
+                      <td className="px-5 py-4"><div className="h-4 w-28 rounded bg-slate-200" /></td>
+                      <td className="px-5 py-4"><div className="h-4 w-44 rounded bg-slate-200" /></td>
+                      <td className="px-5 py-4"><div className="h-4 w-24 rounded bg-slate-200" /></td>
+                      <td className="px-5 py-4 text-right"><div className="ml-auto h-4 w-24 rounded bg-slate-200" /></td>
+                      <td className="px-5 py-4 text-right"><div className="ml-auto h-4 w-20 rounded bg-slate-200" /></td>
+                      <td className="px-5 py-4 text-right"><div className="ml-auto h-4 w-24 rounded bg-slate-200" /></td>
+                      <td className="px-5 py-4"><div className="h-4 w-24 rounded bg-slate-200" /></td>
+                      <td className="px-5 py-4"><div className="h-6 w-24 rounded-full bg-slate-200" /></td>
+                      <td className="px-5 py-4"><div className="h-9 w-64 rounded-2xl bg-slate-200" /></td>
+                      <td className="px-5 py-4 text-right"><div className="ml-auto h-9 w-9 rounded-2xl bg-slate-200" /></td>
                     </tr>
                   ))
                 ) : rows.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-5 py-12 text-center text-slate-500">
+                    <td colSpan={10} className="px-5 py-12 text-center text-slate-500">
                       No credit notes found.
                       <div className="mt-3">
                         <Link href="/sales/credit-notes/new">
@@ -472,92 +619,186 @@ export default function CreditNotesPage() {
                     </td>
                   </tr>
                 ) : (
-                  rows.map((r) => (
-                    <tr key={String(r.id)} className="group transition hover:bg-slate-50/70">
-                      <td className="px-5 py-4">
-                        <Link
-                          href={`/sales/credit-notes/${r.id}`}
-                          className="inline-flex items-center gap-2 font-extrabold text-slate-900 hover:underline"
-                        >
-                          {r.credit_note_number}
-                          <ArrowUpRight className="size-4 text-slate-400 group-hover:text-slate-600" />
-                        </Link>
-                        <div className="mt-1 text-xs text-slate-500">
-                          {r.created_at ? `Created ${fmtDate(r.created_at)}` : "—"}
-                        </div>
-                      </td>
+                  rows.map((r) => {
+                    const id = safeId(r.id);
+                    const href = id ? `/sales/credit-notes/${encodeURIComponent(id)}` : "";
 
-                      <td className="px-5 py-4">
-                        <div className="font-semibold text-slate-900">{r.customer_name ?? "—"}</div>
-                        <div className="mt-1 text-xs text-slate-500">Customer ID: {r.customer_id}</div>
-                      </td>
+                    return (
+                      <tr
+                        key={id || getCreditNo(r)}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => {
+                          if (!href) return;
+                          router.push(href);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && href) router.push(href);
+                        }}
+                        className="group transition hover:bg-slate-50/70 cursor-pointer"
+                      >
+                        <td className="px-5 py-4">
+                          {href ? (
+                            <Link
+                              href={href}
+                              onClick={(e) => e.stopPropagation()}
+                              className="inline-flex items-center gap-2 font-extrabold text-slate-900 hover:underline"
+                            >
+                              {getCreditNo(r)}
+                              <ArrowUpRight className="size-4 text-slate-400 group-hover:text-slate-600" />
+                            </Link>
+                          ) : (
+                            <div className="font-extrabold text-slate-900">{getCreditNo(r)}</div>
+                          )}
+                          <div className="mt-1 text-xs text-slate-500">
+                            {r.created_at ? `Created ${fmtDate(r.created_at)}` : "—"}
+                          </div>
+                        </td>
 
-                      <td className="px-5 py-4">
-                        <div className="inline-flex items-center gap-2 text-slate-700">
-                          <Calendar className="size-4 text-slate-400" />
-                          {fmtDate(r.credit_note_date)}
-                        </div>
-                      </td>
+                        <td className="px-5 py-4">
+                          <div className="font-semibold text-slate-900">{r.customer_name ?? "—"}</div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            Customer ID: {r.customer_id ?? "—"}
+                          </div>
+                        </td>
 
-                      <td className="px-5 py-4">
-                        <div className="text-sm text-slate-700">
+                        <td className="px-5 py-4">
+                          <div className="inline-flex items-center gap-2 text-slate-700">
+                            <Calendar className="size-4 text-slate-400" />
+                            {fmtDate(getCreditDate(r))}
+                          </div>
+                        </td>
+
+                        <td className="px-5 py-4 text-right text-slate-900">
+                          {money(r.subtotal)}
+                        </td>
+
+                        <td className="px-5 py-4 text-right text-slate-900">
+                          {money(r.vat)}
+                        </td>
+
+                        <td className="px-5 py-4 text-right font-extrabold text-slate-900">
+                          {money(r.total_amount)}
+                        </td>
+
+                        <td className="px-5 py-4">
                           {r.invoice_id ? (
-                            <span className="font-semibold">{String(r.invoice_id)}</span>
+                            <Link
+                              href={`/sales/invoices/${encodeURIComponent(String(r.invoice_id))}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="inline-flex items-center gap-2 text-sm font-semibold text-slate-900 hover:underline"
+                            >
+                              {String(r.invoice_id)}
+                              <ArrowUpRight className="size-4 text-slate-400" />
+                            </Link>
                           ) : (
                             <span className="text-slate-500">—</span>
                           )}
-                        </div>
-                        {r.reason ? <div className="mt-1 text-xs text-slate-500 line-clamp-1">{r.reason}</div> : null}
-                      </td>
+                        </td>
 
-                      <td className="px-5 py-4 text-right font-extrabold text-slate-900">
-                        {money(r.total_amount)}
-                      </td>
+                        <td className="px-5 py-4">
+                          <span className={cn("inline-flex rounded-full px-3 py-1 text-xs font-semibold", statusTone(r.status ?? undefined))}>
+                            {String(r.status || "").replaceAll("_", " ") || "—"}
+                          </span>
+                        </td>
 
-                      <td className="px-5 py-4">
-                        <span className={cn("inline-flex rounded-full px-3 py-1 text-xs font-semibold", statusTone(r.status))}>
-                          {String(r.status || "").replaceAll("_", " ") || "—"}
-                        </span>
-                      </td>
+                        <td className="px-5 py-4" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex flex-wrap gap-2">
+                            <Link href={href || "#"} aria-disabled={!href}>
+                              <Button variant="outline" className="h-9 rounded-xl">
+                                Open
+                              </Button>
+                            </Link>
 
-                      <td className="px-5 py-4 text-right">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="outline" className="h-9 w-9 rounded-2xl p-0 bg-white/70 hover:bg-white">
-                              <span className="sr-only">Actions</span>
-                              <ArrowUpRight className="size-4 text-slate-600" />
-                            </Button>
-                          </DropdownMenuTrigger>
-
-                          <DropdownMenuContent align="end" className="w-56">
-                            <DropdownMenuItem asChild>
-                              <Link href={`/sales/credit-notes/${r.id}`}>Open details</Link>
-                            </DropdownMenuItem>
-
-                            <DropdownMenuItem
-                              onClick={() =>
-                                window.open(`/sales/credit-notes/${r.id}/print`, "_blank", "noopener,noreferrer")
-                              }
+                            <Button
+                              variant="outline"
+                              className="h-9 rounded-xl"
+                              onClick={() => {
+                                if (!id) return;
+                                window.open(
+                                  `/sales/credit-notes/${encodeURIComponent(id)}/print`,
+                                  "_blank",
+                                  "noopener,noreferrer"
+                                );
+                              }}
+                              disabled={!id}
                             >
-                              Print / Save PDF
-                            </DropdownMenuItem>
+                              <Printer className="mr-2 size-4" />
+                              Print
+                            </Button>
 
-                            <DropdownMenuSeparator />
+                            <Button
+                              variant="outline"
+                              className="h-9 rounded-xl"
+                              onClick={() => {
+                                if (!id) return;
+                                sendWhatsApp(id, getCreditNo(r), r.customer_name ?? null);
+                              }}
+                              disabled={!id}
+                            >
+                              <MessageCircle className="mr-2 size-4" />
+                              WhatsApp
+                            </Button>
+                          </div>
+                        </td>
 
-                            {r.invoice_id ? (
+                        <td className="px-5 py-4 text-right" onClick={(e) => e.stopPropagation()}>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="outline" className="h-9 w-9 rounded-2xl p-0 bg-white/70 hover:bg-white">
+                                <span className="sr-only">Actions</span>
+                                <MoreHorizontal className="size-4 text-slate-600" />
+                              </Button>
+                            </DropdownMenuTrigger>
+
+                            <DropdownMenuContent align="end" className="w-56">
                               <DropdownMenuItem asChild>
-                                <Link href={`/sales/invoices/${r.invoice_id}`} className="text-slate-700">
-                                  Open linked invoice
+                                <Link href={href || "#"} aria-disabled={!href}>
+                                  Open details
                                 </Link>
                               </DropdownMenuItem>
-                            ) : (
-                              <DropdownMenuItem disabled>Open linked invoice</DropdownMenuItem>
-                            )}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </td>
-                    </tr>
-                  ))
+
+                              <DropdownMenuItem
+                                disabled={!id}
+                                onClick={() => {
+                                  if (!id) return;
+                                  window.open(
+                                    `/sales/credit-notes/${encodeURIComponent(id)}/print`,
+                                    "_blank",
+                                    "noopener,noreferrer"
+                                  );
+                                }}
+                              >
+                                Print / Save PDF
+                              </DropdownMenuItem>
+
+                              <DropdownMenuItem
+                                disabled={!id}
+                                onClick={() => {
+                                  if (!id) return;
+                                  sendWhatsApp(id, getCreditNo(r), r.customer_name ?? null);
+                                }}
+                              >
+                                Send to WhatsApp
+                              </DropdownMenuItem>
+
+                              <DropdownMenuSeparator />
+
+                              {r.invoice_id ? (
+                                <DropdownMenuItem asChild>
+                                  <Link href={`/sales/invoices/${encodeURIComponent(String(r.invoice_id))}`}>
+                                    Open linked invoice
+                                  </Link>
+                                </DropdownMenuItem>
+                              ) : (
+                                <DropdownMenuItem disabled>Open linked invoice</DropdownMenuItem>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

@@ -1,12 +1,34 @@
-// src/components/layout/AppHeader.tsx
 "use client";
 
 import * as React from "react";
-import { Bell, Search, Menu, PanelLeft } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Bell, Search, Menu, PanelLeft, Plus, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useSidebarState } from "./SidebarState";
+
+/* =========================
+   Types
+========================= */
+
+type PermissionsResponse = {
+  ok: boolean;
+  data?: {
+    userId: string;
+    roleKeys: string[];
+    permissions: string[];
+  };
+  error?: any;
+};
+
+type OverdueNotificationsResponse = {
+  ok: boolean;
+  data?: {
+    count: number;
+  };
+  error?: any;
+};
 
 /* =========================
    Helpers
@@ -17,8 +39,29 @@ function n2(v: any) {
   return Number.isFinite(x) ? x : 0;
 }
 
+async function safeGet<T>(url: string): Promise<T> {
+  const res = await fetch(url, { cache: "no-store" });
+  const ct = res.headers.get("content-type") || "";
+  const raw = await res.text();
+
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try {
+      const j = JSON.parse(raw);
+      msg = j?.error?.message ?? j?.error ?? j?.message ?? msg;
+    } catch {}
+    throw new Error(msg);
+  }
+
+  if (!ct.includes("application/json")) {
+    throw new Error(`Expected JSON but got ${ct || "unknown"}`);
+  }
+
+  return JSON.parse(raw) as T;
+}
+
 /* =========================
-   LIVE (real-time feel)
+   LIVE
 ========================= */
 
 function LivePill({ active = true }: { active?: boolean }) {
@@ -50,7 +93,6 @@ function LivePill({ active = true }: { active?: boolean }) {
 
       <span className="text-[11px] font-semibold tracking-wide">LIVE</span>
 
-      {/* subtle “signal” shimmer */}
       {active && (
         <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(60%_120%_at_50%_0%,rgba(255,255,255,0.55),transparent_60%)] opacity-70" />
       )}
@@ -59,14 +101,10 @@ function LivePill({ active = true }: { active?: boolean }) {
 }
 
 /* =========================
-   Notification bell pulse
+   Bell
 ========================= */
 
-function BellButton({
-  count,
-}: {
-  count: number;
-}) {
+function BellButton({ count }: { count: number }) {
   const has = count > 0;
 
   return (
@@ -81,11 +119,10 @@ function BellButton({
         "transition-all duration-300 hover:scale-[1.02]"
       )}
       aria-label="Notifications"
-      title="Notifications — unpaid invoices > 30 days"
+      title="Notifications — unpaid invoices older than 30 days"
     >
       <Bell className={cn("size-4", has ? "text-slate-900" : "text-slate-700")} />
 
-      {/* pulsing ring when there are notifications */}
       {has && (
         <>
           <span className="pointer-events-none absolute -right-1 -top-1 inline-flex size-5">
@@ -111,7 +148,7 @@ function BellButton({
 }
 
 /* =========================
-   Spotlight Search
+   Search
 ========================= */
 
 function SpotlightSearch({
@@ -125,7 +162,6 @@ function SpotlightSearch({
 
   return (
     <div className="relative">
-      {/* Outer orange border (always visible, premium) */}
       <div
         className={cn(
           "relative rounded-2xl p-[1px]",
@@ -135,7 +171,6 @@ function SpotlightSearch({
           focused && "shadow-[0_18px_46px_rgba(255,122,24,0.16)]"
         )}
       >
-        {/* Spotlight sweep */}
         <span
           className={cn(
             "pointer-events-none absolute inset-0 overflow-hidden rounded-2xl",
@@ -153,7 +188,6 @@ function SpotlightSearch({
           />
         </span>
 
-        {/* Inner glass input shell */}
         <div
           className={cn(
             "relative rounded-2xl",
@@ -178,13 +212,10 @@ function SpotlightSearch({
               "text-slate-900 placeholder:text-slate-500"
             )}
           />
-
-          {/* subtle top gloss */}
           <span className="pointer-events-none absolute inset-0 rounded-2xl bg-[linear-gradient(180deg,rgba(255,255,255,0.65),transparent_55%)] opacity-60" />
         </div>
       </div>
 
-      {/* extra ambient glow when focused */}
       <span
         className={cn(
           "pointer-events-none absolute -inset-2 rounded-3xl",
@@ -198,22 +229,83 @@ function SpotlightSearch({
 }
 
 /* =========================
-   AppHeader
+   Header
 ========================= */
 
 export default function AppHeader() {
+  const router = useRouter();
   const { collapsed, toggleCollapsed, openMobile } = useSidebarState();
 
-  // Replace with real logic:
-  // unpaid invoices older than 30 days
-  // Example: fetch('/api/notifications/unpaid-overdue?days=30')
-  const overdueUnpaidCount = 0;
-
   const [q, setQ] = React.useState("");
+  const [loadingPerms, setLoadingPerms] = React.useState(true);
+  const [permError, setPermError] = React.useState("");
+  const [roleKeys, setRoleKeys] = React.useState<string[]>([]);
+  const [permissions, setPermissions] = React.useState<string[]>([]);
+  const [overdueUnpaidCount, setOverdueUnpaidCount] = React.useState(0);
+
+  React.useEffect(() => {
+    let alive = true;
+
+    async function loadHeaderData() {
+      setLoadingPerms(true);
+      setPermError("");
+
+      try {
+        const permsRes = await safeGet<PermissionsResponse>("/api/auth/me/permissions");
+
+        if (!alive) return;
+
+        if (!permsRes.ok || !permsRes.data) {
+          throw new Error(permsRes?.error ?? "Failed to load permissions");
+        }
+
+        setRoleKeys(Array.isArray(permsRes.data.roleKeys) ? permsRes.data.roleKeys : []);
+        setPermissions(Array.isArray(permsRes.data.permissions) ? permsRes.data.permissions : []);
+
+        try {
+          const notifRes = await safeGet<OverdueNotificationsResponse>(
+            "/api/notifications/unpaid-overdue?days=30"
+          );
+
+          if (!alive) return;
+
+          if (notifRes.ok && notifRes.data) {
+            setOverdueUnpaidCount(n2(notifRes.data.count));
+          } else {
+            setOverdueUnpaidCount(0);
+          }
+        } catch {
+          if (!alive) return;
+          setOverdueUnpaidCount(0);
+        }
+      } catch (e: any) {
+        if (!alive) return;
+        setPermError(e?.message || "Failed to load permissions");
+        setRoleKeys([]);
+        setPermissions([]);
+        setOverdueUnpaidCount(0);
+      } finally {
+        if (alive) setLoadingPerms(false);
+      }
+    }
+
+    void loadHeaderData();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const isAdmin = roleKeys.includes("admin");
+  const canCreateInvoice = isAdmin || permissions.includes("invoices.create");
+  const roleLabel = isAdmin
+    ? "ADMIN"
+    : roleKeys.length > 0
+    ? roleKeys[0].toUpperCase()
+    : "USER";
 
   return (
     <>
-      {/* Keyframes for spotlight */}
       <style jsx global>{`
         @keyframes spotlight {
           0% {
@@ -233,7 +325,6 @@ export default function AppHeader() {
       <header
         className={cn(
           "sticky top-0 z-30",
-          // glass morphism
           "bg-white/55 supports-[backdrop-filter]:bg-white/35 backdrop-blur-2xl",
           "border-b border-slate-200/70",
           "shadow-[0_10px_40px_rgba(2,6,23,0.06)]"
@@ -276,34 +367,36 @@ export default function AppHeader() {
               <PanelLeft className="size-4 text-slate-800" />
             </Button>
 
-            {/* Search (spotlight) */}
+            {/* Search */}
             <div className="flex-1">
               <SpotlightSearch value={q} onChange={setQ} />
             </div>
 
             {/* Right actions */}
             <div className="flex items-center gap-2 sm:gap-3">
-              {/* Live toggle */}
               <div className="hidden sm:block">
                 <LivePill active />
               </div>
 
-              {/* New Invoice */}
-              <Button
-                className={cn(
-                  "h-11 rounded-2xl px-4 sm:px-5",
-                  "bg-[#ff7a18] text-white hover:bg-[#ff6a00]",
-                  "shadow-[0_18px_44px_rgba(255,122,24,0.24)]",
-                  "transition-all duration-300 hover:scale-[1.02] active:scale-[0.99]"
-                )}
-              >
-                New Invoice
-              </Button>
+              {loadingPerms ? (
+                <div className="hidden sm:block h-11 w-[136px] animate-pulse rounded-2xl bg-slate-200/70" />
+              ) : canCreateInvoice ? (
+                <Button
+                  className={cn(
+                    "h-11 rounded-2xl px-4 sm:px-5",
+                    "bg-[#ff7a18] text-white hover:bg-[#ff6a00]",
+                    "shadow-[0_18px_44px_rgba(255,122,24,0.24)]",
+                    "transition-all duration-300 hover:scale-[1.02] active:scale-[0.99]"
+                  )}
+                  onClick={() => router.push("/sales/invoices/new")}
+                >
+                  <Plus className="mr-2 size-4" />
+                  New Invoice
+                </Button>
+              ) : null}
 
-              {/* Notifications */}
               <BellButton count={n2(overdueUnpaidCount)} />
 
-              {/* Account */}
               <Button
                 variant="outline"
                 size="icon"
@@ -315,25 +408,26 @@ export default function AppHeader() {
                   "transition-all duration-300 hover:scale-[1.02]"
                 )}
                 aria-label="Account"
-                title="Account"
+                title={permError ? "Permission load failed" : roleLabel}
               >
-                <span className="text-xs font-extrabold text-slate-800">KS</span>
+                <span className="text-[11px] font-extrabold text-slate-800">
+                  {permError ? "!" : roleLabel.slice(0, 2)}
+                </span>
               </Button>
             </div>
           </div>
 
-          {/* Mobile: LIVE row */}
+          {/* Mobile bottom row */}
           <div className="pb-2 sm:hidden">
             <div className="flex items-center justify-between">
               <LivePill active />
               <span className="text-[11px] text-slate-600">
-                Alerts: unpaid &gt; 30 days
+                {permError ? "Permission sync failed" : `Role: ${roleLabel}`}
               </span>
             </div>
           </div>
         </div>
 
-        {/* premium divider */}
         <div className="h-px w-full bg-gradient-to-r from-transparent via-slate-200/80 to-transparent" />
       </header>
     </>
