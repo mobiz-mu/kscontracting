@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import Image from "next/image";
-import { cn } from "@/lib/utils";
 
 export type KSDocVariant = "invoice" | "credit_note" | "quotation";
 
@@ -69,19 +68,24 @@ function n2(v: any) {
 }
 
 function money(n: number) {
-  return `Rs ${n.toLocaleString("en-US", {
+  return `Rs ${n.toLocaleString("en-MU", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
 }
 
-function getFieldValue(lines: string[] | undefined, label: string) {
-  const found = (lines ?? []).find((x) =>
-    x.toLowerCase().startsWith(label.toLowerCase())
-  );
-  if (!found) return "";
-  const idx = found.indexOf(":");
-  return idx >= 0 ? found.slice(idx + 1).trim() : found.trim();
+function fmtDate(v?: string | null) {
+  if (!v) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+    const [yyyy, mm, dd] = v.split("-");
+    return `${dd}/${mm}/${yyyy}`;
+  }
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return String(v);
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
 }
 
 export default function InvoiceKSDoc({
@@ -91,26 +95,24 @@ export default function InvoiceKSDoc({
   data: KSInvoiceDocData;
   variant?: KSDocVariant;
 }) {
-  const _variant = data.doc?.variant ?? variant;
+  const currentVariant = data.doc?.variant ?? variant;
 
   const title =
     data.doc?.title ??
-    (_variant === "quotation"
+    (currentVariant === "quotation"
       ? "QUOTATION"
-      : _variant === "credit_note"
+      : currentVariant === "credit_note"
       ? "CREDIT NOTE"
       : "VAT INVOICE");
 
-  const numberLabel = data.doc?.numberLabel ?? "No.";
   const items = data.items ?? [];
-
   const subtotal = n2(data.totals.subtotal);
   const vat = n2(data.totals.vat);
   const total = n2(data.totals.total);
 
-  const clientVat = getFieldValue(data.billTo.lines, "Client VAT Reg. No.");
-  const clientBrn = getFieldValue(data.billTo.lines, "Client BRN No.");
-  const siteAddress = getFieldValue(data.billTo.lines, "Site Address");
+  const issueDate = fmtDate(data.invoice.issueDate || "");
+  const rowsToRender = Math.max(items.length, 8);
+  const paddedRows = Array.from({ length: rowsToRender }, (_, i) => items[i] ?? null);
 
   return (
     <>
@@ -122,9 +124,21 @@ export default function InvoiceKSDoc({
 
         html,
         body {
+          margin: 0;
+          padding: 0;
+          background: #ffffff;
           -webkit-print-color-adjust: exact;
           print-color-adjust: exact;
+        }
+
+        .ks-doc-root {
+          font-family: "Times New Roman", Times, serif;
+          color: #000000;
           background: #ffffff;
+        }
+
+        .ks-doc-root .ks-desc-font {
+          font-family: Poppins, "Segoe UI", Arial, sans-serif;
         }
 
         @media print {
@@ -135,265 +149,209 @@ export default function InvoiceKSDoc({
             background: #ffffff !important;
           }
 
-          .ks-a4-wrap {
-            width: 210mm !important;
-            min-height: 297mm !important;
-            max-width: 210mm !important;
+          .ks-doc-root {
+            width: 194mm !important;
+            min-height: 281mm !important;
+            max-width: 194mm !important;
             margin: 0 auto !important;
+            background: #ffffff !important;
             box-shadow: none !important;
-            border-radius: 0 !important;
-            page-break-after: avoid !important;
-            page-break-before: avoid !important;
-          }
-
-          .ks-page-shell {
-            padding: 0 !important;
-            margin: 0 !important;
-          }
-
-          .ks-invoice-card {
-            border: 0.6mm solid #111 !important;
           }
         }
       `}</style>
 
-      <div className="ks-a4-wrap mx-auto w-full max-w-[210mm] min-h-[297mm] bg-white text-black">
-        <div className="ks-page-shell px-[6mm] py-[6mm]">
-          <div className="ks-invoice-card border-[1.6px] border-black bg-white">
-            {/* Header */}
-            <div className="px-8 pb-0 pt-7">
-              <div className="grid grid-cols-[128px_1fr] items-center gap-6">
-                <div className="flex items-center justify-center">
-                  <div className="relative h-[96px] w-[116px]">
-                    <Image
-                      src={data.company.logoSrc}
-                      alt={`${data.company.name} logo`}
-                      fill
-                      className="object-contain"
-                      priority
-                    />
-                  </div>
-                </div>
+      <div className="ks-doc-root mx-auto w-[194mm] max-w-[194mm] min-h-[281mm] bg-white text-black">
+        {/* Header */}
+        <div className="grid grid-cols-[68mm_1fr] items-start gap-[6mm]">
+          <div className="flex items-start justify-start">
+            <div className="relative h-[50mm] w-[66mm]">
+              <Image
+                src={data.company.logoSrc}
+                alt={`${data.company.name} logo`}
+                fill
+                className="object-contain object-left-top"
+                priority
+              />
+            </div>
+          </div>
 
-                <div className="pr-10 text-center">
-                  <div className="text-[22px] font-extrabold tracking-tight">
-                    {data.company.name}
-                  </div>
-
-                  <div className="mt-2 space-y-0.5 text-[12.5px] leading-[1.45]">
-                    {(data.company.addressLines ?? []).map((line, i) => (
-                      <div key={i}>{line}</div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Title band */}
-              <div className="mt-6 border-b-[2px] border-t-[2px] border-black py-5">
-                <div className="grid grid-cols-[1fr_auto] items-center">
-                  <div className="pl-[120px] text-center text-[19px] font-extrabold tracking-[0.04em]">
-                    {title}
-                  </div>
-                  <div className="text-[16px] font-extrabold">
-                    {numberLabel} {data.invoice.number || "—"}
-                  </div>
-                </div>
-              </div>
+          <div className="pt-[1.5mm] text-center">
+            <div className="text-[8.6mm] font-black uppercase leading-[0.95] tracking-[0.01em] text-black">
+              {data.company.name}
             </div>
 
-            {/* Client info */}
-            <div className="px-8 pb-5 pt-6 text-[13.5px]">
-              <div className="grid grid-cols-2 gap-x-12 gap-y-5">
-                <div>
-                  <span className="font-extrabold">Name:</span>{" "}
-                  {data.billTo.name || "—"}
-                </div>
-                <div>
-                  <span className="font-extrabold">Date:</span>{" "}
-                  {data.invoice.issueDate || "—"}
-                </div>
-
-                <div>
-                  <span className="font-extrabold">Client&apos;s VAT Reg. No.:</span>{" "}
-                  {clientVat || "—"}
-                </div>
-                <div>
-                  <span className="font-extrabold">Client&apos;s BRN No.:</span>{" "}
-                  {clientBrn || "—"}
-                </div>
-
-                <div className="col-span-2">
-                  <span className="font-extrabold">Site Address:</span>{" "}
-                  {siteAddress || "—"}
-                </div>
-              </div>
+            <div className="mt-[2.6mm] space-y-[0.8mm] text-[3.8mm] leading-[1.25] text-black">
+              {(data.company.addressLines ?? []).map((line, i) => (
+                <div key={i}>{line}</div>
+              ))}
             </div>
 
-            {/* Items table */}
-            <div className="px-8">
-              <table className="w-full border-collapse text-[13.5px]">
-                <thead>
-                  <tr className="border-b-[2px] border-t-[2px] border-black">
-                    <th className="w-[110px] border-r-[2px] border-black px-4 py-4 text-left font-extrabold">
-                      Qty.
-                    </th>
-                    <th className="border-r-[2px] border-black px-4 py-4 text-left font-extrabold">
-                      DESCRIPTION
-                    </th>
-                    <th className="w-[230px] px-4 py-4 text-right font-extrabold">
-                      AMOUNT
-                    </th>
+            <div className="mt-[4mm] grid grid-cols-[1fr_auto] items-center">
+              <div className="pl-[6mm] text-center text-[6.9mm] font-black uppercase leading-none tracking-[0.02em] text-black">
+                {title}
+              </div>
+
+              <div className="pr-[1mm] text-right text-[4.8mm] font-black leading-none text-[#de7a32]">
+                No. {data.invoice.number || "—"}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Items table */}
+        <div className="mt-[8mm]">
+          <table className="w-full border-collapse text-black">
+            <thead>
+              <tr className="bg-[#f36a24]">
+                <th className="border border-black px-[2.6mm] py-[2.8mm] text-center text-[4.1mm] font-black">
+                  Date
+                </th>
+                <th className="border border-black px-[2.6mm] py-[2.8mm] text-center text-[4.1mm] font-black">
+                  Item Description
+                </th>
+                <th className="border border-black px-[2.6mm] py-[2.8mm] text-center text-[4.1mm] font-black">
+                  Price
+                </th>
+                <th className="border border-black px-[2.6mm] py-[2.8mm] text-center text-[4.1mm] font-black">
+                  Qty
+                </th>
+                <th className="border border-black px-[2.6mm] py-[2.8mm] text-center text-[4.1mm] font-black">
+                  Total
+                </th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {paddedRows.map((it, idx) => {
+                const qty = it ? n2(it.qty) : 0;
+                const unitPrice = it ? n2(it.unitPrice) : 0;
+                const lineTotal =
+                  it && Number.isFinite(Number(it.lineTotal))
+                    ? n2(it.lineTotal)
+                    : it && Number.isFinite(Number(it.amount))
+                    ? n2(it.amount)
+                    : qty * unitPrice;
+
+                return (
+                  <tr key={it?.id ?? `empty-${idx}`}>
+                    <td className="h-[11.2mm] border border-black px-[2.2mm] py-[2.1mm] align-top text-[3.1mm]">
+                      {it ? issueDate : ""}
+                    </td>
+                    <td className="ks-desc-font h-[11.2mm] border border-black px-[2.6mm] py-[2.1mm] align-top text-[3.05mm] leading-[1.35]">
+                      {it?.description || ""}
+                    </td>
+                    <td className="h-[11.2mm] border border-black px-[2.2mm] py-[2.1mm] text-right align-top text-[3.1mm]">
+                      {it ? money(unitPrice) : ""}
+                    </td>
+                    <td className="h-[11.2mm] border border-black px-[2.2mm] py-[2.1mm] text-center align-top text-[3.1mm]">
+                      {it ? qty : ""}
+                    </td>
+                    <td className="h-[11.2mm] border border-black px-[2.2mm] py-[2.1mm] text-right align-top text-[3.1mm] font-bold">
+                      {it ? money(lineTotal) : ""}
+                    </td>
                   </tr>
-                </thead>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
 
-                <tbody>
-                  {items.length === 0 ? (
-                    <tr>
-                      <td className="h-[340px] border-r-[2px] border-black px-4 py-5 align-top">
-                        —
-                      </td>
-                      <td className="h-[340px] border-r-[2px] border-black px-4 py-5 align-top">
-                        No items
-                      </td>
-                      <td className="h-[340px] px-4 py-5 text-right align-top">
-                        {money(0)}
-                      </td>
-                    </tr>
-                  ) : (
-                    <>
-                      {items.map((it, idx) => {
-                        const qty = n2(it.qty);
-                        const line =
-                          Number.isFinite(Number(it.lineTotal))
-                            ? n2(it.lineTotal)
-                            : Number.isFinite(Number(it.amount))
-                            ? n2(it.amount)
-                            : qty * n2(it.unitPrice) + n2(it.vatAmount);
-
-                        const isLast = idx === items.length - 1;
-
-                        return (
-                          <tr key={it.id ?? String(idx)}>
-                            <td
-                              className={cn(
-                                "border-r-[2px] border-black px-4 py-5 align-top text-[14px]",
-                                isLast && "h-[340px]"
-                              )}
-                            >
-                              {qty || "—"}
-                            </td>
-                            <td
-                              className={cn(
-                                "border-r-[2px] border-black px-4 py-5 align-top whitespace-pre-wrap break-words text-[14px] leading-7",
-                                isLast && "h-[340px]"
-                              )}
-                            >
-                              {it.description || "—"}
-                            </td>
-                            <td
-                              className={cn(
-                                "px-4 py-5 text-right text-[14px] font-extrabold align-top",
-                                isLast && "h-[340px]"
-                              )}
-                            >
-                              {money(line)}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </>
-                  )}
-                </tbody>
-              </table>
+        {/* Bottom area */}
+        <div className="mt-[8mm] grid grid-cols-[1fr_78mm] gap-[8mm]">
+          {/* Left bank details */}
+          <div>
+            <div className="text-[4.9mm] font-black text-[#de7a32]">
+              Bank Details :
             </div>
 
-            {/* Bottom section */}
-            <div className="px-8 pb-8 pt-6">
-              <div className="grid grid-cols-[1fr_360px] gap-8">
-                {/* left */}
-                <div className="relative min-h-[190px]">
-                  <div className="text-[13.5px] font-extrabold">
-                    For {data.company.name}
-                  </div>
-
-                  {data.company.signatureSrc ? (
-                    <div className="mt-8">
-                      <div className="relative h-[76px] w-[190px]">
-                        <Image
-                          src={data.company.signatureSrc}
-                          alt="Digital signature"
-                          fill
-                          className="object-contain object-left"
-                        />
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <div className="mt-4 w-[220px] border-t-[1.6px] border-black pt-2 text-[12px]">
-                    Authorised Signature
-                  </div>
-
-                  {data.company.stampSrc ? (
-                    <div className="absolute bottom-0 left-[180px]">
-                      <div className="relative h-[110px] w-[110px] opacity-95">
-                        <Image
-                          src={data.company.stampSrc}
-                          alt="KS stamp"
-                          fill
-                          className="object-contain"
-                        />
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <div className="mt-10 text-[12px] leading-6">
-                    <div className="font-extrabold">Bank Details:</div>
-                    <div>{data.notes || "MCB 000446509687"}</div>
-                  </div>
-                </div>
-
-                {/* right totals */}
-                <div className="self-end border-[2px] border-black">
-                  <div className="grid grid-cols-[1fr_1fr] text-[13.5px]">
-                    <div className="border-b-[1.6px] border-black px-5 py-4 font-extrabold">
-                      Sub Total
-                    </div>
-                    <div className="border-b-[1.6px] border-black px-5 py-4 text-right">
-                      {money(subtotal)}
-                    </div>
-
-                    <div className="border-b-[1.6px] border-black px-5 py-4 font-extrabold">
-                      VAT 15%
-                    </div>
-                    <div className="border-b-[1.6px] border-black px-5 py-4 text-right">
-                      {money(vat)}
-                    </div>
-
-                    <div className="px-5 py-5 text-[18px] font-extrabold">TOTAL</div>
-                    <div className="px-5 py-5 text-right text-[18px] font-extrabold">
-                      {money(total)}
-                    </div>
-                  </div>
-                </div>
+            <div className="mt-[4.2mm] space-y-[2.2mm] text-[4mm] leading-[1.4] text-black">
+              <div>
+                <span className="font-black">Bank Name:</span>{" "}
+                Mauritius Commercial Bank
+              </div>
+              <div>
+                <span className="font-black">Account Name :</span>{" "}
+                {data.company.name}
+              </div>
+              <div>
+                <span className="font-black">Account Number:</span>{" "}
+                000446509687
               </div>
             </div>
           </div>
 
-          {(data.paymentTerms || data.referenceLines?.length) && (
-            <div className="mt-3 text-[11px] text-slate-700">
-              {data.paymentTerms ? (
-                <div>
-                  <span className="font-semibold">Terms:</span> {data.paymentTerms}
-                </div>
-              ) : null}
-              {data.referenceLines?.length ? (
-                <div className="mt-1">
-                  <span className="font-semibold">Reference:</span>{" "}
-                  {data.referenceLines.join(" • ")}
-                </div>
-              ) : null}
+          {/* Right totals */}
+          <div className="space-y-[2.6mm]">
+            <div className="grid grid-cols-[1fr_30mm] border border-black">
+              <div className="px-[2.4mm] py-[2.6mm] text-[4.6mm] font-black text-black">
+                SUB TOTAL :
+              </div>
+              <div className="px-[2.4mm] py-[2.6mm] text-right text-[4mm] text-black">
+                {money(subtotal)}
+              </div>
             </div>
-          )}
+
+            <div className="grid grid-cols-[1fr_30mm] border border-black">
+              <div className="px-[2.4mm] py-[2.6mm] text-[4.6mm] font-black text-black">
+                VAT 15% :
+              </div>
+              <div className="px-[2.4mm] py-[2.6mm] text-right text-[4mm] text-black">
+                {money(vat)}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-[1fr_30mm] border border-black">
+              <div className="px-[2.4mm] py-[2.6mm] text-[4.9mm] font-black text-black">
+                TOTAL :
+              </div>
+              <div className="px-[2.4mm] py-[2.6mm] text-right text-[4.6mm] font-black text-black">
+                {money(total)}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Stamp + signature */}
+        <div className="mt-[5mm] grid grid-cols-2 items-end">
+          <div className="flex items-end justify-center">
+            {data.company.stampSrc ? (
+              <div className="relative h-[34mm] w-[34mm]">
+                <Image
+                  src={data.company.stampSrc}
+                  alt="KS stamp"
+                  fill
+                  className="object-contain"
+                />
+              </div>
+            ) : (
+              <div className="h-[34mm] w-[34mm]" />
+            )}
+          </div>
+
+          <div className="flex flex-col items-center justify-end">
+            {data.company.signatureSrc ? (
+              <div className="relative h-[38mm] w-[84mm] bg-white">
+                <Image
+                  src={data.company.signatureSrc}
+                  alt="Authorised signature"
+                  fill
+                  className="object-contain"
+                />
+              </div>
+            ) : (
+              <div className="h-[38mm] w-[84mm] bg-white" />
+            )}
+
+            <div className="mt-[0.5mm] w-[86mm] border-t border-black" />
+            <div className="mt-[1.8mm] text-center text-[4.4mm] font-bold text-black">
+              Authorised Signature
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="mt-[8mm] text-center text-[7.6mm] font-normal uppercase tracking-[0.02em] text-black">
+          THANK YOU FOR YOUR BUSINESS !
         </div>
       </div>
     </>

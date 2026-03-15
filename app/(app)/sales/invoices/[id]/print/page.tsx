@@ -3,7 +3,15 @@
 import * as React from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Printer, RefreshCw, Sparkles } from "lucide-react";
+import {
+  ArrowLeft,
+  Printer,
+  RefreshCw,
+  Sparkles,
+  FileText,
+  BadgeCheck,
+  Building2,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -13,7 +21,7 @@ type ApiInvoice = {
   id: string;
   invoice_no: string;
   status?: string | null;
-  invoice_type?: "VAT_INVOICE" | "PRO_FORMA" | string | null;
+  invoice_type?: "VAT_INVOICE" | "PRO_FORMA" | "STANDARD" | "VAT" | "PROFORMA" | string | null;
   invoice_date?: string | null;
   notes?: string | null;
   subtotal?: number | null;
@@ -63,6 +71,13 @@ function isValidId(id: string) {
   return true;
 }
 
+function invoiceTypeLabel(v?: string | null) {
+  const x = String(v ?? "").toUpperCase();
+  if (x === "PRO_FORMA" || x === "PROFORMA") return "PRO FORMA INVOICE";
+  if (x === "VAT_INVOICE" || x === "VAT") return "VAT INVOICE";
+  return "STANDARD INVOICE";
+}
+
 async function safeGet<T>(url: string): Promise<T> {
   const res = await fetch(url, { cache: "no-store" });
   const ct = res.headers.get("content-type") || "";
@@ -72,10 +87,30 @@ async function safeGet<T>(url: string): Promise<T> {
   return JSON.parse(text) as T;
 }
 
+function Chip({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold",
+        "bg-white/90 text-slate-700 ring-1 ring-white/70 backdrop-blur-sm",
+        className
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
 function GlassBar({ children }: { children: React.ReactNode }) {
   return (
     <div className="print:hidden">
-      <div className="relative overflow-hidden rounded-[24px] ring-1 ring-slate-200/70 bg-white/80 backdrop-blur-xl shadow-[0_18px_60px_rgba(2,6,23,0.10)]">
+      <div className="relative overflow-hidden rounded-[24px] border border-slate-200/80 bg-white/80 backdrop-blur-xl shadow-[0_18px_60px_rgba(2,6,23,0.10)]">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(800px_260px_at_20%_0%,rgba(7,27,56,0.12),transparent_60%),radial-gradient(700px_260px_at_110%_0%,rgba(255,122,24,0.14),transparent_60%)]" />
         <div className="relative px-4 py-3 sm:px-5 sm:py-4">{children}</div>
       </div>
@@ -139,29 +174,136 @@ export default function InvoicePrintPage() {
     const style = document.createElement("style");
     style.setAttribute("data-ks-print", "1");
     style.innerHTML = `
-      @page { size: A4 portrait; margin: 0; }
+      @page {
+        size: A4 portrait;
+        margin: 0;
+      }
+
       html, body {
-        -webkit-print-color-adjust: exact;
-        print-color-adjust: exact;
         margin: 0;
         padding: 0;
-        background: #fff;
+        background: #eef2f7;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
       }
+
+      /* Screen preview */
+      #ks-print-page {
+        min-height: 100vh;
+      }
+
+      #ks-preview-shell {
+        width: 100%;
+        overflow: auto;
+        padding-bottom: 12px;
+      }
+
+      #ks-preview-frame {
+        width: fit-content;
+        margin: 0 auto;
+      }
+
+      /* A4 paper preview on screen */
+      #ks-paper {
+        width: 210mm;
+        min-height: 297mm;
+        background: #ffffff;
+        box-shadow: 0 16px 48px rgba(2, 6, 23, 0.12);
+      }
+
+      /* Actual invoice block inside paper */
+      #ks-print-root {
+        width: 194mm;
+        min-height: 281mm;
+        margin: 8mm auto;
+        background: #ffffff;
+      }
+
+      .ks-screen-scale {
+        transform-origin: top center;
+      }
+
+      @media screen and (max-width: 1400px) {
+        .ks-screen-scale { transform: scale(0.92); }
+      }
+      @media screen and (max-width: 1200px) {
+        .ks-screen-scale { transform: scale(0.84); }
+      }
+      @media screen and (max-width: 1024px) {
+        .ks-screen-scale { transform: scale(0.72); }
+      }
+      @media screen and (max-width: 768px) {
+        .ks-screen-scale { transform: scale(0.58); }
+      }
+      @media screen and (max-width: 560px) {
+        .ks-screen-scale { transform: scale(0.48); }
+      }
+
       @media print {
+        html, body {
+          margin: 0 !important;
+          padding: 0 !important;
+          width: 210mm !important;
+          height: 297mm !important;
+          background: #ffffff !important;
+          overflow: hidden !important;
+        }
+
         body * {
-          visibility: hidden;
+          visibility: hidden !important;
         }
-        #ks-print-root, #ks-print-root * {
-          visibility: visible;
+
+        #ks-print-page,
+        #ks-print-page * {
+          visibility: visible !important;
         }
+
+        #ks-print-page {
+          position: fixed !important;
+          inset: 0 !important;
+          width: 210mm !important;
+          height: 297mm !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          background: #ffffff !important;
+          overflow: hidden !important;
+        }
+
+        #ks-preview-shell,
+        #ks-preview-frame {
+          width: 210mm !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          overflow: hidden !important;
+        }
+
+        .ks-screen-scale {
+          transform: none !important;
+        }
+
+        #ks-paper {
+          width: 210mm !important;
+          height: 297mm !important;
+          min-height: 297mm !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          background: #ffffff !important;
+          box-shadow: none !important;
+          overflow: hidden !important;
+        }
+
         #ks-print-root {
-          position: absolute;
-          inset: 0;
-          width: 210mm;
-          min-height: 297mm;
-          margin: 0 auto;
-          padding: 0;
-          background: #fff;
+          width: 194mm !important;
+          min-height: 281mm !important;
+          max-width: 194mm !important;
+          margin: 8mm auto !important;
+          padding: 0 !important;
+          background: #ffffff !important;
+          box-shadow: none !important;
+        }
+
+        .print\\:hidden {
+          display: none !important;
         }
       }
     `;
@@ -194,8 +336,7 @@ export default function InvoicePrintPage() {
         : Math.max(0, total - balance);
 
     const cust = invoice.customers ?? null;
-    const invoiceType =
-      invoice.invoice_type === "PRO_FORMA" ? "PRO FORMA INVOICE" : "VAT INVOICE";
+    const invoiceType = invoiceTypeLabel(invoice.invoice_type);
 
     return {
       company: {
@@ -237,13 +378,11 @@ export default function InvoicePrintPage() {
             ? n2(it.unit_price_excl_vat)
             : n2(it.price);
 
-        const vRate =
-          Number.isFinite(Number(it.vat_rate)) && n2(it.vat_rate) > 0
-            ? n2(it.vat_rate)
-            : 0.15;
+        const rawRate = n2(it.vat_rate);
+        const vatRate = rawRate > 1 ? rawRate / 100 : rawRate || 0.15;
 
         const vAmt =
-          Number.isFinite(Number(it.vat_amount)) ? n2(it.vat_amount) : qty * unit * vRate;
+          Number.isFinite(Number(it.vat_amount)) ? n2(it.vat_amount) : qty * unit * vatRate;
 
         const lineTotal =
           Number.isFinite(Number(it.line_total))
@@ -255,7 +394,7 @@ export default function InvoicePrintPage() {
           description: String(it.description ?? ""),
           qty,
           unitPrice: unit,
-          vatRate: vRate,
+          vatRate,
           vatAmount: vAmt,
           lineTotal,
         };
@@ -272,11 +411,53 @@ export default function InvoicePrintPage() {
     };
   }, [invoice, items]);
 
+  const invoiceTypeText = invoice ? invoiceTypeLabel(invoice.invoice_type) : "Invoice";
+  const canPrint = !!doc;
+
   return (
-    <div className="px-3 py-3 print:p-0 sm:px-6 sm:py-6">
+    <div
+      id="ks-print-page"
+      className="min-h-screen bg-slate-100 px-3 py-3 print:bg-white print:p-0 sm:px-6 sm:py-6"
+    >
       <GlassBar>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <Chip className="bg-white text-[#071b38] ring-white/80">
+                <Building2 className="size-3.5 text-[#071b38]" />
+                KS Contracting
+              </Chip>
+
+              <Chip className="bg-[#ff8a1e]/10 text-[#c25708] ring-[#ff8a1e]/20">
+                <BadgeCheck className="size-3.5" />
+                Print Center
+              </Chip>
+
+              {invoice ? (
+                <Chip className="bg-slate-50 text-slate-700 ring-slate-200">
+                  <FileText className="size-3.5 text-slate-500" />
+                  {invoice.invoice_no}
+                </Chip>
+              ) : null}
+            </div>
+
+            <div className="mt-3">
+              <h1 className="text-xl font-extrabold tracking-tight text-slate-950 sm:text-2xl">
+                Premium Invoice Print View
+              </h1>
+              <p className="mt-1 text-sm text-slate-600">
+                {invoice
+                  ? `${invoiceTypeText} ready for printing or PDF export.`
+                  : loading
+                  ? "Loading invoice document..."
+                  : hasId
+                  ? "Invoice preview unavailable."
+                  : "Missing invoice id."}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
             <Link href={hasId ? `/sales/invoices/${encodeURIComponent(id)}` : "/sales/invoices"}>
               <Button
                 variant="outline"
@@ -296,9 +477,7 @@ export default function InvoicePrintPage() {
               <RefreshCw className={cn("mr-2 size-4", loading && "animate-spin")} />
               Refresh
             </Button>
-          </div>
 
-          <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="outline"
               className="rounded-2xl border-slate-200 bg-white/70 hover:bg-white"
@@ -311,9 +490,14 @@ export default function InvoicePrintPage() {
               }}
               disabled={!doc}
             >
-              <Sparkles className="mr-2 size-4 text-[#ff7a18]" />
-              Auto Print:{" "}
-              <span className={cn("ml-1 font-semibold", autoPrint ? "text-emerald-700" : "text-slate-600")}>
+              <Sparkles className="mr-2 size-4 text-[#ff8a1e]" />
+              Auto Print:
+              <span
+                className={cn(
+                  "ml-1 font-semibold",
+                  autoPrint ? "text-emerald-700" : "text-slate-600"
+                )}
+              >
                 {autoPrint ? "ON" : "OFF"}
               </span>
             </Button>
@@ -321,7 +505,7 @@ export default function InvoicePrintPage() {
             <Button
               onClick={() => window.print()}
               className="rounded-2xl bg-[#071b38] text-white hover:bg-[#06142b] shadow-[0_14px_40px_rgba(7,27,56,0.18)]"
-              disabled={!doc}
+              disabled={!canPrint}
             >
               <Printer className="mr-2 size-4" />
               Print / Save PDF
@@ -336,14 +520,22 @@ export default function InvoicePrintPage() {
         </div>
       ) : null}
 
-      <div id="ks-print-root" className="mt-3 print:mt-0">
-        {doc ? (
-          <InvoiceKSDoc data={doc} variant="invoice" />
-        ) : (
-          <div className="print:hidden rounded-3xl bg-white p-6 text-sm text-slate-600 shadow-[0_18px_60px_rgba(2,6,23,0.08)] ring-1 ring-slate-200">
-            {loading ? "Loading invoice…" : hasId ? "No document." : "Missing invoice id."}
+      <div id="ks-preview-shell" className="mt-3 print:mt-0">
+        <div id="ks-preview-frame">
+          <div className="ks-screen-scale">
+            <div id="ks-paper">
+              <div id="ks-print-root">
+                {doc ? (
+                  <InvoiceKSDoc data={doc} variant="invoice" />
+                ) : (
+                  <div className="print:hidden rounded-[28px] border border-slate-200 bg-white p-6 text-sm text-slate-600 shadow-[0_18px_60px_rgba(2,6,23,0.08)]">
+                    {loading ? "Loading invoice…" : hasId ? "No document available." : "Missing invoice id."}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
-        )}
+        </div>
       </div>
 
       <div className="mt-3 text-xs text-slate-400 print:hidden">

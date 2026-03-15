@@ -21,12 +21,35 @@ function n2(v: any) {
   return Number.isFinite(x) ? x : 0;
 }
 
+function normalizeInvoiceType(v: any) {
+  const s = String(v ?? "").trim().toUpperCase();
+
+  if (s === "PRO_FORMA" || s === "PROFORMA") return "PROFORMA";
+  if (s === "VAT_INVOICE" || s === "VAT") return "VAT";
+  if (s === "STANDARD") return "STANDARD";
+
+  return "STANDARD";
+}
+
+function normalizeStatus(v: any) {
+  const raw = String(v ?? "").trim().toUpperCase();
+
+  if (raw === "ALL") return "ALL";
+  if (raw === "DRAFT") return "DRAFT";
+  if (raw === "ISSUED") return "ISSUED";
+  if (raw === "PAID") return "PAID";
+  if (raw === "PARTIALLY_PAID") return "PARTIALLY_PAID";
+  if (raw === "VOID") return "VOID";
+
+  return "DRAFT";
+}
+
 /**
  * Body from UI:
  * {
  *   id?: string,
- *   status?: "DRAFT" | "ISSUED",
- *   invoice_type?: "VAT_INVOICE" | "PRO_FORMA",
+ *   status?: "DRAFT" | "ISSUED" | "PAID" | "PARTIALLY_PAID" | "VOID",
+ *   invoice_type?: "STANDARD" | "VAT" | "PROFORMA" | legacy values,
  *   invoice_date: string,
  *   customer_id: number,
  *   site_address?: string,
@@ -46,9 +69,6 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
     const admin = createSupabaseAdminClient();
 
-    // -----------------------------
-    // Validate + normalize
-    // -----------------------------
     const invoiceId = String(body.id ?? "").trim() || null;
 
     const customerIdNum = Number(body.customer_id);
@@ -61,16 +81,14 @@ export async function POST(req: Request) {
       return jsonError(400, { error: "invoice_date is required (yyyy-mm-dd)" });
     }
 
-    const invoice_type =
-      String(body.invoice_type ?? "VAT_INVOICE").toUpperCase() === "PRO_FORMA"
-        ? "PRO_FORMA"
-        : "VAT_INVOICE";
+    const invoice_type = normalizeInvoiceType(body.invoice_type);
+    const status = normalizeStatus(body.status);
 
-    const status = String(body.status ?? "DRAFT").toUpperCase();
-    const notes = typeof body.notes === "string" ? body.notes : null;
-    const site_address = typeof body.site_address === "string" ? body.site_address.trim() : null;
+    const notes = typeof body.notes === "string" ? body.notes.trim() || null : null;
+    const site_address =
+      typeof body.site_address === "string" ? body.site_address.trim() || null : null;
 
-    // KS rule: VAT is fixed at 15%
+    // KS rule: VAT fixed at 15%
     const vat_rate = 0.15;
 
     const rows = Array.isArray(body.rows) ? body.rows : [];
@@ -88,9 +106,6 @@ export async function POST(req: Request) {
       });
     }
 
-    // -----------------------------
-    // Always compute totals server-side
-    // -----------------------------
     const computedSubtotal = cleanRows.reduce(
       (s: number, r: any) => s + n2(r.qty) * n2(r.unit_price_excl_vat),
       0
@@ -101,9 +116,13 @@ export async function POST(req: Request) {
     const paid_amount = n2(body.paid_amount ?? 0);
     const balance_amount = Math.max(0, computedTotal - paid_amount);
 
-    // -----------------------------
-    // Create or update invoice
-    // -----------------------------
+    let finalStatus = status;
+    if (balance_amount <= 0 && computedTotal > 0) {
+      finalStatus = "PAID";
+    } else if (paid_amount > 0 && balance_amount > 0) {
+      finalStatus = "PARTIALLY_PAID";
+    }
+
     let savedInvoice: any = null;
 
     if (!invoiceId) {
@@ -114,7 +133,7 @@ export async function POST(req: Request) {
           invoice_type,
           invoice_date,
           site_address,
-          status,
+          status: finalStatus,
           notes,
           subtotal: computedSubtotal,
           vat_amount: computedVat,
@@ -123,8 +142,7 @@ export async function POST(req: Request) {
           balance_amount,
           created_by: userRes.user.id,
         })
-        .select(
-          `
+        .select(`
           id,
           invoice_no,
           customer_id,
@@ -139,8 +157,7 @@ export async function POST(req: Request) {
           paid_amount,
           balance_amount,
           created_at
-        `
-        )
+        `)
         .single();
 
       if (error) {
@@ -159,7 +176,7 @@ export async function POST(req: Request) {
           invoice_type,
           invoice_date,
           site_address,
-          status,
+          status: finalStatus,
           notes,
           subtotal: computedSubtotal,
           vat_amount: computedVat,
@@ -169,8 +186,7 @@ export async function POST(req: Request) {
         })
         .eq("id", invoiceId)
         .eq("created_by", userRes.user.id)
-        .select(
-          `
+        .select(`
           id,
           invoice_no,
           customer_id,
@@ -185,8 +201,7 @@ export async function POST(req: Request) {
           paid_amount,
           balance_amount,
           created_at
-        `
-        )
+        `)
         .single();
 
       if (error) {
@@ -201,9 +216,6 @@ export async function POST(req: Request) {
 
     const savedId = String(savedInvoice.id);
 
-    // -----------------------------
-    // Replace invoice_items
-    // -----------------------------
     const { error: delErr } = await admin.from("invoice_items").delete().eq("invoice_id", savedId);
 
     if (delErr) {
@@ -266,19 +278,21 @@ export async function GET(req: Request) {
       return jsonError(401, { error: "Unauthorized", supabaseError: safeError(uErr) });
     }
 
+    const admin = createSupabaseAdminClient();
+
     const url = new URL(req.url);
     const q = (url.searchParams.get("q") ?? "").trim();
-    const status = (url.searchParams.get("status") ?? "ALL").toUpperCase();
+    const rawStatus = normalizeStatus(url.searchParams.get("status") ?? "ALL");
 
     const page = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
-    const pageSize = Math.min(200, Math.max(10, Number(url.searchParams.get("pageSize") ?? "25") || 25));
-    const from = (page - 1) * pageSize;
-    const to = from + pageSize - 1;
+    const pageSize = Math.min(
+      200,
+      Math.max(10, Number(url.searchParams.get("pageSize") ?? "25") || 25)
+    );
 
-    let query = supabase
+    const { data: invoiceBase, error: baseErr } = await admin
       .from("invoices")
-      .select(
-        `
+      .select(`
         id,
         invoice_no,
         customer_id,
@@ -292,37 +306,58 @@ export async function GET(req: Request) {
         total_amount,
         paid_amount,
         balance_amount,
-        created_at,
-        customers:customer_id ( name )
-      `,
-        { count: "exact" }
-      )
+        created_at
+      `)
       .eq("created_by", userRes.user.id)
       .order("created_at", { ascending: false });
 
-    if (status !== "ALL") query = query.eq("status", status);
-
-    if (q) {
-      query = query.or(`invoice_no.ilike.%${q}%,customers.name.ilike.%${q}%`);
-    }
-
-    const { data, error, count } = await query.range(from, to);
-
-    if (error) {
-      console.error("[GET /api/invoices] supabase error", error);
+    if (baseErr) {
+      console.error("[GET /api/invoices] base invoices error", baseErr);
       return jsonError(500, {
-        error: "Supabase query failed",
-        supabaseError: safeError(error),
+        error: "Failed to load invoices",
+        supabaseError: safeError(baseErr),
       });
     }
 
-    const rows =
-      (data ?? []).map((r: any) => ({
+    const invoices = invoiceBase ?? [];
+    const customerIds = Array.from(
+      new Set(
+        invoices
+          .map((r: any) => Number(r.customer_id))
+          .filter((v: any) => Number.isFinite(v) && v > 0)
+      )
+    );
+
+    let customerMap = new Map<number, { id: number; name: string | null }>();
+
+    if (customerIds.length > 0) {
+      const { data: customers, error: custErr } = await admin
+        .from("customers")
+        .select("id, name")
+        .in("id", customerIds);
+
+      if (custErr) {
+        console.error("[GET /api/invoices] customers error", custErr);
+        return jsonError(500, {
+          error: "Failed to load customers",
+          supabaseError: safeError(custErr),
+        });
+      }
+
+      customerMap = new Map(
+        (customers ?? []).map((c: any) => [Number(c.id), { id: Number(c.id), name: c.name ?? null }])
+      );
+    }
+
+    const allRows = invoices.map((r: any) => {
+      const customer = customerMap.get(Number(r.customer_id));
+
+      return {
         id: r.id,
         invoice_no: r.invoice_no,
         customer_id: r.customer_id,
-        customer_name: r.customers?.name ?? null,
-        invoice_type: r.invoice_type ?? "VAT_INVOICE",
+        customer_name: customer?.name ?? null,
+        invoice_type: r.invoice_type ?? "STANDARD",
         invoice_date: r.invoice_date ?? null,
         site_address: r.site_address ?? null,
         status: r.status,
@@ -333,16 +368,75 @@ export async function GET(req: Request) {
         paid_amount: r.paid_amount,
         balance_amount: r.balance_amount,
         created_at: r.created_at,
-      })) ?? [];
+      };
+    });
+
+    let filtered = allRows;
+
+    if (q) {
+      const needle = q.toLowerCase();
+      filtered = filtered.filter((r: any) => {
+        const invoiceNo = String(r.invoice_no ?? "").toLowerCase();
+        const customerName = String(r.customer_name ?? "").toLowerCase();
+        return invoiceNo.includes(needle) || customerName.includes(needle);
+      });
+    }
+
+    if (rawStatus !== "ALL") {
+      filtered = filtered.filter(
+        (r: any) => String(r.status ?? "").toUpperCase() === rawStatus
+      );
+    }
+
+    const byStatus: Record<string, number> = {
+      DRAFT: 0,
+      ISSUED: 0,
+      PAID: 0,
+      PARTIALLY_PAID: 0,
+      VOID: 0,
+    };
+
+    for (const r of filtered) {
+      const s = String(r.status ?? "").toUpperCase();
+      byStatus[s] = (byStatus[s] ?? 0) + 1;
+    }
+
+    const totalInvoices = filtered.length;
+    const totalValue = filtered.reduce((s: number, r: any) => s + n2(r.total_amount), 0);
+    const totalOutstanding = filtered.reduce((s: number, r: any) => s + n2(r.balance_amount), 0);
+
+    const today = new Date();
+    const overdueCount = filtered.filter((r: any) => {
+      const bal = n2(r.balance_amount);
+      if (bal <= 0) return false;
+      if (!r.invoice_date) return false;
+
+      const d = new Date(r.invoice_date);
+      if (Number.isNaN(d.getTime())) return false;
+
+      return d < today && !["PAID", "VOID"].includes(String(r.status ?? "").toUpperCase());
+    }).length;
+
+    const total = filtered.length;
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize;
+    const paged = filtered.slice(from, to);
 
     return NextResponse.json({
       ok: true,
-      data: rows,
+      data: paged,
       meta: {
         page,
         pageSize,
-        total: count ?? rows.length,
-        hasMore: typeof count === "number" ? to + 1 < count : rows.length === pageSize,
+        total,
+        hasMore: to < total,
+      },
+      kpi: {
+        totalInvoices,
+        totalValue,
+        totalOutstanding,
+        overdueCount,
+        byStatus,
       },
     });
   } catch (e: any) {

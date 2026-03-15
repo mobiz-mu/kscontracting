@@ -18,6 +18,10 @@ import {
   Mail,
   MapPin,
   Percent,
+  Wallet,
+  BadgeCheck,
+  ReceiptText,
+  ArrowUpRight,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -40,7 +44,7 @@ type ApiInvoice = {
   id: string;
   invoice_no: string;
   status?: string | null;
-  invoice_type?: "VAT_INVOICE" | "PRO_FORMA" | string | null;
+  invoice_type?: "VAT_INVOICE" | "PRO_FORMA" | "STANDARD" | "VAT" | "PROFORMA" | string | null;
   invoice_date?: string | null;
   notes?: string | null;
   subtotal?: number | null;
@@ -91,7 +95,7 @@ function n2(v: any) {
 
 function money(v: any) {
   const n = n2(v);
-  return `Rs ${n.toLocaleString("en-US", {
+  return `Rs ${n.toLocaleString("en-MU", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
@@ -99,13 +103,19 @@ function money(v: any) {
 
 function fmtDate(v?: string | null) {
   if (!v) return "—";
-  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+    const [yyyy, mm, dd] = v.split("-");
+    return `${dd}/${mm}/${yyyy}`;
+  }
+
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return String(v);
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
+
   const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
 }
 
 function getParamId(p: any): string {
@@ -125,7 +135,10 @@ function statusStyle(s?: string | null) {
 }
 
 function invoiceTypeLabel(v?: string | null) {
-  return String(v).toUpperCase() === "PRO_FORMA" ? "PRO FORMA INVOICE" : "VAT INVOICE";
+  const x = String(v ?? "").toUpperCase();
+  if (x === "PRO_FORMA" || x === "PROFORMA") return "PRO FORMA INVOICE";
+  if (x === "VAT_INVOICE" || x === "VAT") return "VAT INVOICE";
+  return "STANDARD INVOICE";
 }
 
 async function safeJson<T>(res: Response): Promise<T> {
@@ -152,17 +165,42 @@ async function safeJson<T>(res: Response): Promise<T> {
    UI atoms
 ========================= */
 
-function Card3D({ children, className }: { children: React.ReactNode; className?: string }) {
+function Chip({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
-    <div
+    <span
       className={cn(
-        "relative overflow-hidden rounded-3xl bg-white ring-1 ring-slate-200/80",
-        "shadow-[0_1px_0_rgba(15,23,42,0.08),0_18px_45px_rgba(15,23,42,0.10)]",
+        "inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold",
+        "bg-white/90 text-slate-700 ring-1 ring-white/70 backdrop-blur-sm",
         className
       )}
     >
-      <div className="pointer-events-none absolute inset-0 opacity-70 bg-[radial-gradient(700px_260px_at_16%_0%,rgba(7,27,56,0.12),transparent_60%)]" />
-      <div className="relative">{children}</div>
+      {children}
+    </span>
+  );
+}
+
+function Surface({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "relative overflow-hidden rounded-[28px] border border-slate-200/80 bg-white",
+        "shadow-[0_1px_0_rgba(15,23,42,0.04),0_20px_50px_rgba(15,23,42,0.08)]",
+        className
+      )}
+    >
+      {children}
     </div>
   );
 }
@@ -171,10 +209,12 @@ function StatBox({
   label,
   value,
   tone = "slate",
+  sub,
 }: {
   label: string;
   value: string;
   tone?: "slate" | "navy" | "orange" | "emerald";
+  sub?: string;
 }) {
   const tones: Record<string, string> = {
     slate: "bg-slate-50 ring-slate-200 text-slate-900",
@@ -184,10 +224,10 @@ function StatBox({
   };
 
   return (
-    <div className={cn("rounded-2xl p-4 ring-1", tones[tone])}>
+    <div className={cn("rounded-[24px] p-4 ring-1 sm:p-5", tones[tone])}>
       <div
         className={cn(
-          "text-xs font-semibold",
+          "text-[10px] font-bold uppercase tracking-[0.18em]",
           tone === "navy" || tone === "orange" ? "text-white/70" : "text-slate-500"
         )}
       >
@@ -195,11 +235,45 @@ function StatBox({
       </div>
       <div
         className={cn(
-          "mt-1 text-lg font-extrabold tracking-tight",
-          tone === "navy" || tone === "orange" ? "text-white" : "text-slate-900"
+          "mt-2 text-[22px] font-extrabold tracking-tight sm:text-[24px]",
+          tone === "navy" || tone === "orange" ? "text-white" : "text-slate-950"
         )}
       >
         {value}
+      </div>
+      {sub ? (
+        <div
+          className={cn(
+            "mt-1 text-xs",
+            tone === "navy" || tone === "orange" ? "text-white/75" : "text-slate-600"
+          )}
+        >
+          {sub}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function InfoRow({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: React.ElementType;
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="grid size-9 place-items-center rounded-2xl bg-slate-50 ring-1 ring-slate-200">
+        <Icon className="size-4 text-slate-500" />
+      </div>
+      <div className="min-w-0">
+        <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
+          {label}
+        </div>
+        <div className="mt-1 break-words text-sm font-semibold text-slate-900">{value}</div>
       </div>
     </div>
   );
@@ -223,6 +297,9 @@ export default function InvoiceDetailsPage() {
   const [invoice, setInvoice] = React.useState<ApiInvoice | null>(null);
   const [items, setItems] = React.useState<ApiItem[]>([]);
   const [lastSync, setLastSync] = React.useState<Date | null>(null);
+
+  const baseOrigin =
+    typeof window !== "undefined" ? window.location.origin : "";
 
   const load = React.useCallback(async () => {
     if (!hasId) return;
@@ -297,13 +374,24 @@ export default function InvoiceDetailsPage() {
   const cust = invoice?.customers ?? null;
   const invoiceType = invoiceTypeLabel(invoice?.invoice_type);
 
-  const printUrl = hasId ? `${window.location.origin}/sales/invoices/${id}/print` : "";
+  const printPath = hasId ? `/sales/invoices/${id}/print` : "#";
+  const printUrl = hasId ? `${baseOrigin}${printPath}` : "";
+
   const whatsappText = invoice
-    ? `Hello,\n\nPlease find your ${invoiceType} from KS Contracting Ltd.\nInvoice No: ${invoice.invoice_no}\nAmount: ${money(total)}\n\nView invoice:\n${printUrl}`
+    ? `Hello,
+
+Please find your ${invoiceType} from KS Contracting Ltd.
+Invoice No: ${invoice.invoice_no}
+Amount: ${money(total)}
+
+View invoice:
+${printUrl}
+
+Thank you.`
     : "";
 
   const whatsappUrl = invoice
-    ? `https://wa.me/23059416756?text=${encodeURIComponent(whatsappText)}`
+    ? `https://wa.me/?text=${encodeURIComponent(whatsappText)}`
     : "#";
 
   const emailSubject = invoice
@@ -311,94 +399,101 @@ export default function InvoiceDetailsPage() {
     : "KS Contracting Invoice";
 
   const emailBody = invoice
-    ? `Hello,%0D%0A%0D%0APlease find your ${invoiceType} from KS Contracting Ltd.%0D%0AInvoice No: ${invoice.invoice_no}%0D%0AAmount: ${encodeURIComponent(
-        money(total)
-      )}%0D%0A%0D%0AView invoice:%0D%0A${encodeURIComponent(printUrl)}%0D%0A%0D%0AThank you.`
+    ? `Hello,
+
+Please find your ${invoiceType} from KS Contracting Ltd.
+Invoice No: ${invoice.invoice_no}
+Amount: ${money(total)}
+
+View invoice:
+${printUrl}
+
+Thank you.`
     : "";
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {/* Header */}
-      <div className="relative overflow-hidden rounded-3xl ring-1 ring-slate-200 bg-white">
-        <div className="absolute inset-0 bg-[radial-gradient(900px_460px_at_12%_-20%,rgba(7,27,56,0.14),transparent_60%),radial-gradient(700px_420px_at_110%_-10%,rgba(255,122,24,0.14),transparent_60%),linear-gradient(180deg,rgba(248,250,252,1),rgba(255,255,255,1))]" />
-        <div className="relative px-5 py-4 sm:px-7 sm:py-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <Surface className="overflow-hidden">
+        <div className="absolute inset-0 bg-[linear-gradient(135deg,#071b38_0%,#0d2c59_48%,#163d73_100%)]" />
+        <div className="absolute inset-0 opacity-80 bg-[radial-gradient(900px_320px_at_-10%_-20%,rgba(255,255,255,0.14),transparent_55%),radial-gradient(700px_300px_at_110%_0%,rgba(255,153,51,0.20),transparent_50%)]" />
+
+        <div className="relative px-4 py-5 sm:px-6 sm:py-6 xl:px-7 xl:py-7">
+          <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <Button
                   variant="outline"
-                  className="h-10 rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
+                  className="h-10 rounded-2xl border-white/20 bg-white/10 px-4 text-white backdrop-blur-sm hover:bg-white/16 hover:text-white"
                   onClick={() => router.push("/sales/invoices")}
                 >
                   <ArrowLeft className="mr-2 size-4" />
                   Back
                 </Button>
 
-                {invoice ? (
+                {invoice?.status ? (
                   <span
                     className={cn(
-                      "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold",
+                      "inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-sm",
                       statusStyle(invoice.status)
                     )}
                   >
                     {String(invoice.status ?? "—").replaceAll("_", " ")}
                   </span>
                 ) : (
-                  <span className="inline-flex items-center rounded-full border bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-600 border-slate-200">
-                    —
-                  </span>
+                  <Chip className="bg-white/12 text-white ring-white/15">—</Chip>
                 )}
 
                 {invoice ? (
-                  <span className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
-                    <FileText className="size-3.5 text-slate-500" />
+                  <Chip className="bg-white/12 text-white ring-white/15">
+                    <FileText className="size-3.5 text-white/85" />
                     {invoiceType}
-                  </span>
+                  </Chip>
                 ) : null}
 
                 {lastSync ? (
-                  <span className="hidden sm:inline-flex items-center gap-2 rounded-full bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
-                    <RefreshCw className="size-3.5 text-slate-500" />
+                  <Chip className="bg-white/12 text-white ring-white/15">
+                    <RefreshCw className="size-3.5 text-white/85" />
                     Synced {lastSync.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                  </span>
+                  </Chip>
                 ) : null}
+
+                <Chip className="bg-[#ff8a1e]/18 text-[#ffd6ad] ring-[#ffb266]/20">
+                  <BadgeCheck className="size-3.5" />
+                  KS Contracting
+                </Chip>
               </div>
 
-              <h1 className="mt-3 text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
-                {invoice?.invoice_no || (loading ? "Loading…" : hasId ? "Invoice" : "Missing invoice id")}
+              <h1 className="mt-3 text-2xl font-extrabold tracking-tight text-white sm:text-3xl xl:text-[2rem]">
+                {invoice?.invoice_no || (loading ? "Loading…" : hasId ? "Invoice Details" : "Missing invoice id")}
               </h1>
 
-              <div className="mt-1 text-sm text-slate-600">
+              <div className="mt-2 text-sm text-blue-50/90 sm:text-[15px]">
                 {cust?.name ? (
                   <>
-                    Customer: <span className="font-semibold text-slate-900">{cust.name}</span>
+                    Customer: <span className="font-bold text-white">{cust.name}</span>
                   </>
                 ) : (
                   "Customer: —"
                 )}
               </div>
 
-              <div className="mt-1 text-sm text-slate-600 flex flex-wrap items-center gap-x-3 gap-y-1">
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-blue-50/85">
                 <span className="inline-flex items-center gap-2">
-                  <Calendar className="size-4 text-slate-400" />
-                  Date: <span className="font-semibold text-slate-900">{fmtDate(invoice?.invoice_date ?? null)}</span>
+                  <Calendar className="size-4 text-blue-100/80" />
+                  Date: <span className="font-semibold text-white">{fmtDate(invoice?.invoice_date ?? null)}</span>
                 </span>
 
-                <span className="text-slate-300">•</span>
-
                 <span className="inline-flex items-center gap-2">
-                  <Percent className="size-4 text-slate-400" />
-                  VAT: <span className="font-semibold text-slate-900">15%</span>
+                  <Percent className="size-4 text-blue-100/80" />
+                  VAT: <span className="font-semibold text-white">15%</span>
                 </span>
 
                 {invoice?.site_address ? (
-                  <>
-                    <span className="text-slate-300">•</span>
-                    <span className="inline-flex items-center gap-2">
-                      <MapPin className="size-4 text-slate-400" />
-                      Site: <span className="font-semibold text-slate-900">{invoice.site_address}</span>
-                    </span>
-                  </>
+                  <span className="inline-flex items-center gap-2">
+                    <MapPin className="size-4 text-blue-100/80" />
+                    Site: <span className="font-semibold text-white">{invoice.site_address}</span>
+                  </span>
                 ) : null}
               </div>
             </div>
@@ -406,7 +501,7 @@ export default function InvoiceDetailsPage() {
             <div className="flex flex-wrap gap-2">
               <Button
                 variant="outline"
-                className="h-11 rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
+                className="h-11 rounded-2xl border-white/20 bg-white/10 px-4 text-white backdrop-blur-sm hover:bg-white/16 hover:text-white"
                 onClick={load}
                 disabled={loading || !hasId}
               >
@@ -414,10 +509,10 @@ export default function InvoiceDetailsPage() {
                 Refresh
               </Button>
 
-              <Link href={hasId ? `/sales/invoices/${id}/print` : "#"} aria-disabled={!invoice || !hasId}>
+              <Link href={printPath} aria-disabled={!invoice || !hasId}>
                 <Button
                   variant="outline"
-                  className="h-11 rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
+                  className="h-11 rounded-2xl border-white/20 bg-white/10 px-4 text-white backdrop-blur-sm hover:bg-white/16 hover:text-white"
                   disabled={!invoice || !hasId}
                 >
                   <Printer className="mr-2 size-4" />
@@ -428,7 +523,7 @@ export default function InvoiceDetailsPage() {
               <Button
                 onClick={issueInvoice}
                 disabled={!canIssue || issuing || !hasId}
-                className="h-11 rounded-2xl bg-[#ff7a18] text-white hover:bg-[#ff6a00] shadow-[0_18px_44px_rgba(255,122,24,0.22)]"
+                className="h-11 rounded-2xl bg-[#ff8a1e] px-5 font-semibold text-white shadow-[0_18px_44px_rgba(255,138,30,0.24)] hover:bg-[#f07c0f]"
                 title={!canIssue ? "Only Draft invoices can be issued" : "Issue invoice"}
               >
                 {issuing ? <RefreshCw className="mr-2 size-4 animate-spin" /> : <Send className="mr-2 size-4" />}
@@ -447,223 +542,265 @@ export default function InvoiceDetailsPage() {
             </div>
           ) : null}
         </div>
-      </div>
+      </Surface>
 
       {/* KPI row */}
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-4">
         <StatBox label="Sub Total" value={invoice ? money(subtotal) : "—"} />
         <StatBox label="VAT 15%" value={invoice ? money(vat) : "—"} />
-        <StatBox label="TOTAL" value={invoice ? money(total) : "—"} tone="navy" />
-        <StatBox label="Balance" value={invoice ? money(balance) : "—"} tone={balance <= 0 ? "emerald" : "orange"} />
+        <StatBox label="Total" value={invoice ? money(total) : "—"} tone="navy" />
+        <StatBox
+          label="Balance"
+          value={invoice ? money(balance) : "—"}
+          tone={balance <= 0 ? "emerald" : "orange"}
+          sub={invoice ? (balance <= 0 ? "Settled" : "Outstanding") : undefined}
+        />
       </div>
 
       {/* Content */}
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_380px] items-start">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px] items-start">
         {/* LEFT */}
         <div className="space-y-4">
-          <Card3D className="p-0">
-            <div className="flex items-center justify-between px-5 py-4">
+          <Surface>
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-4 sm:px-5">
               <div className="min-w-0">
-                <div className="text-sm font-semibold text-slate-900">Invoice Items</div>
-                <div className="mt-0.5 text-xs text-slate-600">{invoice ? `${items.length} item(s)` : "—"}</div>
+                <div className="text-base font-bold tracking-tight text-slate-950">Invoice Items</div>
+                <div className="mt-1 text-sm text-slate-600">
+                  {invoice ? `${items.length} item(s) on this invoice` : "—"}
+                </div>
               </div>
 
               {invoice ? (
-                <span className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
-                  <FileText className="size-4 text-slate-500" />
+                <Chip className="bg-slate-50 text-slate-700 ring-slate-200">
+                  <ReceiptText className="size-4 text-slate-500" />
                   MUR
-                </span>
+                </Chip>
               ) : null}
             </div>
 
-            <div className="border-t border-slate-200 overflow-auto">
-              <table className="w-full min-w-[760px] text-sm">
-                <thead className="bg-slate-50 text-slate-600">
-                  <tr className="[&>th]:px-5 [&>th]:py-3 [&>th]:text-left [&>th]:font-semibold">
-                    <th>Description</th>
-                    <th className="w-[110px] text-right">Qty</th>
-                    <th className="w-[160px] text-right">Unit Price</th>
-                    <th className="w-[140px] text-right">VAT</th>
-                    <th className="w-[170px] text-right">Amount</th>
-                  </tr>
-                </thead>
+            {/* Desktop items */}
+            <div className="hidden md:block p-4 sm:p-5">
+              <div className="grid grid-cols-[minmax(0,1.8fr)_90px_150px_140px_160px] gap-3 rounded-2xl bg-slate-50 px-4 py-3">
+                <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Description</div>
+                <div className="text-right text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Qty</div>
+                <div className="text-right text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Unit Price</div>
+                <div className="text-right text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">VAT</div>
+                <div className="text-right text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Amount</div>
+              </div>
 
-                <tbody className="divide-y divide-slate-100">
-                  {loading ? (
-                    Array.from({ length: 6 }).map((_, i) => (
-                      <tr key={i} className="animate-pulse">
-                        <td className="px-5 py-4">
-                          <div className="h-4 w-[360px] rounded bg-slate-200" />
-                        </td>
-                        <td className="px-5 py-4 text-right">
-                          <div className="ml-auto h-4 w-10 rounded bg-slate-200" />
-                        </td>
-                        <td className="px-5 py-4 text-right">
-                          <div className="ml-auto h-4 w-24 rounded bg-slate-200" />
-                        </td>
-                        <td className="px-5 py-4 text-right">
-                          <div className="ml-auto h-4 w-24 rounded bg-slate-200" />
-                        </td>
-                        <td className="px-5 py-4 text-right">
-                          <div className="ml-auto h-4 w-28 rounded bg-slate-200" />
-                        </td>
-                      </tr>
-                    ))
-                  ) : !invoice ? (
-                    <tr>
-                      <td colSpan={5} className="px-5 py-10 text-center text-slate-500">
-                        No invoice loaded.
-                      </td>
-                    </tr>
-                  ) : items.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="px-5 py-10 text-center text-slate-500">
-                        No items found for this invoice.
-                      </td>
-                    </tr>
-                  ) : (
-                    items.map((it) => (
-                      <tr key={String(it.id)}>
-                        <td className="px-5 py-4">
-                          <div className="font-semibold text-slate-900 whitespace-pre-wrap break-words">
-                            {it.description}
-                          </div>
-                        </td>
-                        <td className="px-5 py-4 text-right font-semibold text-slate-700">{n2(it.qty)}</td>
-                        <td className="px-5 py-4 text-right font-semibold text-slate-900">
-                          {money(it.unit_price_excl_vat)}
-                        </td>
-                        <td className="px-5 py-4 text-right font-semibold text-slate-900">
-                          {money(it.vat_amount)}
-                        </td>
-                        <td className="px-5 py-4 text-right font-extrabold text-slate-900">
-                          {money(it.line_total)}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+              <div className="mt-3 space-y-3">
+                {loading ? (
+                  Array.from({ length: 5 }).map((_, i) => (
+                    <div
+                      key={i}
+                      className="grid animate-pulse grid-cols-[minmax(0,1.8fr)_90px_150px_140px_160px] gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-4"
+                    >
+                      <div className="h-4 w-4/5 rounded bg-slate-200" />
+                      <div className="ml-auto h-4 w-10 rounded bg-slate-200" />
+                      <div className="ml-auto h-4 w-24 rounded bg-slate-200" />
+                      <div className="ml-auto h-4 w-20 rounded bg-slate-200" />
+                      <div className="ml-auto h-4 w-28 rounded bg-slate-200" />
+                    </div>
+                  ))
+                ) : !invoice ? (
+                  <div className="rounded-2xl border border-slate-200 bg-white px-4 py-12 text-center text-slate-500">
+                    No invoice loaded.
+                  </div>
+                ) : items.length === 0 ? (
+                  <div className="rounded-2xl border border-slate-200 bg-white px-4 py-12 text-center text-slate-500">
+                    No items found for this invoice.
+                  </div>
+                ) : (
+                  items.map((it) => (
+                    <div
+                      key={String(it.id)}
+                      className="grid grid-cols-[minmax(0,1.8fr)_90px_150px_140px_160px] gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-4 transition hover:border-slate-300 hover:shadow-[0_12px_28px_rgba(15,23,42,0.05)]"
+                    >
+                      <div className="min-w-0">
+                        <div className="whitespace-pre-wrap break-words font-semibold text-slate-900">
+                          {it.description}
+                        </div>
+                      </div>
+                      <div className="text-right font-semibold text-slate-700">{n2(it.qty)}</div>
+                      <div className="text-right font-semibold text-slate-900">{money(it.unit_price_excl_vat)}</div>
+                      <div className="text-right font-semibold text-slate-900">{money(it.vat_amount)}</div>
+                      <div className="text-right font-extrabold text-slate-950">{money(it.line_total)}</div>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
 
-            <div className="border-t border-slate-200 bg-white px-5 py-4">
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <div className="text-xs text-slate-600">
+            {/* Mobile items */}
+            <div className="md:hidden p-4">
+              <div className="space-y-3">
+                {loading ? (
+                  Array.from({ length: 5 }).map((_, i) => (
+                    <div key={i} className="animate-pulse rounded-2xl border border-slate-200 bg-white p-4">
+                      <div className="h-4 w-3/4 rounded bg-slate-200" />
+                      <div className="mt-4 grid grid-cols-2 gap-3">
+                        <div className="h-14 rounded-2xl bg-slate-100" />
+                        <div className="h-14 rounded-2xl bg-slate-100" />
+                        <div className="h-14 rounded-2xl bg-slate-100" />
+                        <div className="h-14 rounded-2xl bg-slate-100" />
+                      </div>
+                    </div>
+                  ))
+                ) : !invoice ? (
+                  <div className="rounded-2xl border border-slate-200 bg-white px-4 py-12 text-center text-slate-500">
+                    No invoice loaded.
+                  </div>
+                ) : items.length === 0 ? (
+                  <div className="rounded-2xl border border-slate-200 bg-white px-4 py-12 text-center text-slate-500">
+                    No items found for this invoice.
+                  </div>
+                ) : (
+                  items.map((it) => (
+                    <div
+                      key={String(it.id)}
+                      className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_1px_0_rgba(15,23,42,0.04),0_12px_24px_rgba(15,23,42,0.05)]"
+                    >
+                      <div className="font-semibold text-slate-900 whitespace-pre-wrap break-words">
+                        {it.description}
+                      </div>
+
+                      <div className="mt-4 grid grid-cols-2 gap-3">
+                        <div className="rounded-2xl bg-slate-50 p-3">
+                          <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                            Qty
+                          </div>
+                          <div className="mt-1 font-bold text-slate-900">{n2(it.qty)}</div>
+                        </div>
+
+                        <div className="rounded-2xl bg-slate-50 p-3">
+                          <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                            Unit Price
+                          </div>
+                          <div className="mt-1 font-bold text-slate-900">{money(it.unit_price_excl_vat)}</div>
+                        </div>
+
+                        <div className="rounded-2xl bg-slate-50 p-3">
+                          <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                            VAT
+                          </div>
+                          <div className="mt-1 font-bold text-slate-900">{money(it.vat_amount)}</div>
+                        </div>
+
+                        <div className="rounded-2xl bg-[#071b38] p-3">
+                          <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/70">
+                            Amount
+                          </div>
+                          <div className="mt-1 font-extrabold text-white">{money(it.line_total)}</div>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="border-t border-slate-200 bg-white px-4 py-4 sm:px-5">
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+                <div className="text-sm text-slate-600">
                   {invoice?.notes?.trim() ? (
                     <>
                       <span className="font-semibold text-slate-900">Notes:</span> {invoice.notes.trim()}
                     </>
                   ) : (
-                    <span className="text-slate-500">Bank details / payment note will appear here.</span>
+                    <span className="text-slate-500">No additional notes on this invoice.</span>
                   )}
                 </div>
 
-                <div className="ml-auto w-full max-w-[360px] space-y-2">
-                  <div className="flex items-center justify-between text-xs text-slate-600">
+                <div className="w-full space-y-2 rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
+                  <div className="flex items-center justify-between text-sm text-slate-600">
                     <span>Sub Total</span>
                     <span className="font-semibold text-slate-900">{money(subtotal)}</span>
                   </div>
-                  <div className="flex items-center justify-between text-xs text-slate-600">
+                  <div className="flex items-center justify-between text-sm text-slate-600">
                     <span>VAT 15%</span>
                     <span className="font-semibold text-slate-900">{money(vat)}</span>
                   </div>
                   <div className="h-px bg-slate-200" />
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="font-semibold text-slate-700">TOTAL</span>
-                    <span className="font-extrabold text-slate-900">{money(total)}</span>
+                  <div className="flex items-center justify-between text-base">
+                    <span className="font-semibold text-slate-700">Total</span>
+                    <span className="font-extrabold text-slate-950">{money(total)}</span>
                   </div>
-                  <div className="flex items-center justify-between text-xs text-slate-600">
+                  <div className="flex items-center justify-between text-sm text-slate-600">
                     <span>Paid</span>
                     <span className="font-semibold text-slate-900">{money(paid)}</span>
                   </div>
-                  <div className="flex items-center justify-between text-xs text-slate-600">
+                  <div className="flex items-center justify-between text-sm text-slate-600">
                     <span>Balance</span>
-                    <span className={cn("font-extrabold", balance > 0 ? "text-slate-900" : "text-emerald-700")}>
+                    <span className={cn("font-extrabold", balance > 0 ? "text-slate-950" : "text-emerald-700")}>
                       {money(balance)}
                     </span>
                   </div>
                 </div>
               </div>
             </div>
-          </Card3D>
+          </Surface>
         </div>
 
         {/* RIGHT */}
         <div className="space-y-4 xl:sticky xl:top-[92px]">
           {/* Customer card */}
-          <Card3D className="p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-slate-900">Client Details</div>
-                <div className="mt-0.5 text-xs text-slate-600">KS invoice customer information</div>
-              </div>
-              <div className="grid size-10 place-items-center rounded-2xl bg-slate-50 ring-1 ring-slate-200">
-                <Building2 className="size-4 text-slate-500" />
+          <Surface>
+            <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-base font-bold tracking-tight text-slate-950">Client Details</div>
+                  <div className="mt-1 text-sm text-slate-600">Customer and site information</div>
+                </div>
+                <div className="grid size-10 place-items-center rounded-2xl bg-slate-50 ring-1 ring-slate-200">
+                  <Building2 className="size-4 text-slate-500" />
+                </div>
               </div>
             </div>
 
-            <div className="mt-4 space-y-3">
-              <div className="text-sm font-extrabold text-slate-900">{cust?.name ?? "—"}</div>
-
-              {cust?.address ? (
-                <div className="text-sm text-slate-600">{cust.address}</div>
-              ) : (
-                <div className="text-sm text-slate-500">No customer address</div>
-              )}
+            <div className="space-y-4 p-4 sm:p-5">
+              <InfoRow icon={Building2} label="Customer" value={cust?.name ?? "—"} />
+              <InfoRow icon={MapPin} label="Address" value={cust?.address ?? "No customer address"} />
 
               {invoice?.site_address ? (
-                <div className="inline-flex items-center gap-2 text-sm text-slate-700">
-                  <MapPin className="size-4 text-slate-400" />
-                  <span>
-                    Site Address: <span className="font-semibold">{invoice.site_address}</span>
-                  </span>
-                </div>
+                <InfoRow icon={MapPin} label="Site Address" value={invoice.site_address} />
               ) : null}
 
-              {cust?.vat_no || cust?.brn ? (
-                <div className="grid gap-2 text-xs text-slate-600">
-                  {cust?.vat_no ? (
-                    <div className="inline-flex items-center gap-2">
-                      <Percent className="size-4 text-slate-400" />
-                      <span>
-                        Client VAT Reg. No.: <span className="font-semibold text-slate-900">{cust.vat_no}</span>
-                      </span>
-                    </div>
-                  ) : null}
+              {cust?.vat_no ? (
+                <InfoRow icon={Percent} label="Client VAT No." value={cust.vat_no} />
+              ) : null}
 
-                  {cust?.brn ? (
-                    <div className="inline-flex items-center gap-2">
-                      <Hash className="size-4 text-slate-400" />
-                      <span>
-                        Client BRN No.: <span className="font-semibold text-slate-900">{cust.brn}</span>
-                      </span>
-                    </div>
-                  ) : null}
+              {cust?.brn ? (
+                <InfoRow icon={Hash} label="Client BRN No." value={cust.brn} />
+              ) : null}
+
+              {!cust?.vat_no && !cust?.brn ? (
+                <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-200">
+                  No VAT or BRN on customer profile.
                 </div>
-              ) : (
-                <div className="text-xs text-slate-500">No VAT/BRN</div>
-              )}
+              ) : null}
             </div>
-          </Card3D>
+          </Surface>
 
           {/* Actions card */}
-          <Card3D className="p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-slate-900">Actions</div>
-                <div className="mt-0.5 text-xs text-slate-600">Print, WhatsApp, email, issue.</div>
+          <Surface>
+            <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-base font-bold tracking-tight text-slate-950">Actions</div>
+                  <div className="mt-1 text-sm text-slate-600">Print, issue, share and collect</div>
+                </div>
+                {invoice?.status ? (
+                  <Badge variant="secondary" className={cn("rounded-full border", statusStyle(invoice.status))}>
+                    {String(invoice.status).replaceAll("_", " ")}
+                  </Badge>
+                ) : null}
               </div>
-              {invoice?.status ? (
-                <Badge variant="secondary" className={cn("rounded-full border", statusStyle(invoice.status))}>
-                  {String(invoice.status).replaceAll("_", " ")}
-                </Badge>
-              ) : null}
             </div>
 
-            <div className="mt-4 grid gap-2">
-              <Link href={hasId ? `/sales/invoices/${id}/print` : "#"} aria-disabled={!invoice || !hasId}>
+            <div className="space-y-3 p-4 sm:p-5">
+              <Link href={printPath} aria-disabled={!invoice || !hasId}>
                 <Button
-                  className="w-full rounded-2xl bg-[#071b38] text-white hover:bg-[#06142b] shadow-[0_14px_40px_rgba(7,27,56,0.18)]"
+                  className="h-11 w-full rounded-2xl bg-[#071b38] text-white shadow-[0_16px_40px_rgba(7,27,56,0.18)] hover:bg-[#0a2750]"
                   disabled={!invoice || !hasId}
                 >
                   <Printer className="mr-2 size-4" />
@@ -672,7 +809,7 @@ export default function InvoiceDetailsPage() {
               </Link>
 
               <Button
-                className="w-full rounded-2xl bg-[#ff7a18] text-white hover:bg-[#ff6a00] shadow-[0_18px_44px_rgba(255,122,24,0.22)]"
+                className="h-11 w-full rounded-2xl bg-[#ff8a1e] text-white shadow-[0_18px_44px_rgba(255,138,30,0.24)] hover:bg-[#f07c0f]"
                 onClick={issueInvoice}
                 disabled={!canIssue || issuing || !hasId}
                 title={!canIssue ? "Only Draft invoices can be issued" : "Issue invoice"}
@@ -681,11 +818,26 @@ export default function InvoiceDetailsPage() {
                 Issue Invoice
               </Button>
 
+              <Link
+                href={hasId ? `/sales/payments/new?invoiceId=${encodeURIComponent(id)}&invoiceNo=${encodeURIComponent(invoice?.invoice_no || "")}&amount=${encodeURIComponent(String(balance))}` : "#"}
+                aria-disabled={!invoice || !hasId || balance <= 0}
+              >
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
+                  disabled={!invoice || !hasId || balance <= 0}
+                >
+                  <Wallet className="mr-2 size-4" />
+                  Add Payment
+                </Button>
+              </Link>
+
               <a href={whatsappUrl} target="_blank" rel="noreferrer">
                 <Button
                   type="button"
                   variant="outline"
-                  className="w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
+                  className="h-11 w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
                   disabled={!invoice || !hasId}
                 >
                   <MessageCircle className="mr-2 size-4" />
@@ -693,11 +845,11 @@ export default function InvoiceDetailsPage() {
                 </Button>
               </a>
 
-              <a href={invoice ? `mailto:?subject=${encodeURIComponent(emailSubject)}&body=${emailBody}` : "#"}>
+              <a href={invoice ? `mailto:?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}` : "#"}>
                 <Button
                   type="button"
                   variant="outline"
-                  className="w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
+                  className="h-11 w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
                   disabled={!invoice || !hasId}
                 >
                   <Mail className="mr-2 size-4" />
@@ -707,49 +859,49 @@ export default function InvoiceDetailsPage() {
 
               <Button
                 variant="outline"
-                className="w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
-                onClick={() => window.open(`/sales/invoices/${id}/print`, "_blank", "noopener,noreferrer")}
+                className="h-11 w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
+                onClick={() => window.open(printPath, "_blank", "noopener,noreferrer")}
                 disabled={!invoice || !hasId}
               >
-                <FileText className="mr-2 size-4" />
+                <ArrowUpRight className="mr-2 size-4" />
                 Open Print in New Tab
               </Button>
-            </div>
 
-            <div className="mt-4 rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-200">
-              <div className="flex items-center justify-between">
-                <div className="text-xs font-semibold text-slate-700">Payment Snapshot</div>
-                {balance <= 0 && invoice ? (
-                  <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
-                    <CheckCircle2 className="size-4" />
-                    Settled
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800 ring-1 ring-amber-200">
-                    <CreditCard className="size-4" />
-                    Outstanding
-                  </span>
-                )}
-              </div>
+              <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-semibold text-slate-800">Payment Snapshot</div>
+                  {balance <= 0 && invoice ? (
+                    <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
+                      <CheckCircle2 className="size-4" />
+                      Settled
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800 ring-1 ring-amber-200">
+                      <CreditCard className="size-4" />
+                      Outstanding
+                    </span>
+                  )}
+                </div>
 
-              <div className="mt-2 grid gap-1 text-xs text-slate-600">
-                <div className="flex items-center justify-between">
-                  <span>Total</span>
-                  <span className="font-semibold text-slate-900">{invoice ? money(total) : "—"}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span>Paid</span>
-                  <span className="font-semibold text-slate-900">{invoice ? money(paid) : "—"}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span>Balance</span>
-                  <span className={cn("font-extrabold", balance > 0 ? "text-slate-900" : "text-emerald-700")}>
-                    {invoice ? money(balance) : "—"}
-                  </span>
+                <div className="mt-3 space-y-2 text-sm">
+                  <div className="flex items-center justify-between text-slate-600">
+                    <span>Total</span>
+                    <span className="font-semibold text-slate-900">{invoice ? money(total) : "—"}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-slate-600">
+                    <span>Paid</span>
+                    <span className="font-semibold text-slate-900">{invoice ? money(paid) : "—"}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-slate-600">
+                    <span>Balance</span>
+                    <span className={cn("font-extrabold", balance > 0 ? "text-slate-950" : "text-emerald-700")}>
+                      {invoice ? money(balance) : "—"}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
-          </Card3D>
+          </Surface>
         </div>
       </div>
     </div>

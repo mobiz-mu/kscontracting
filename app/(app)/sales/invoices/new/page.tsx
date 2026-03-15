@@ -19,6 +19,10 @@ import {
   BadgeCheck,
   MapPin,
   FileText,
+  Wallet,
+  Sparkles,
+  ChevronDown,
+  ClipboardList,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -31,7 +35,12 @@ import { cn } from "@/lib/utils";
 
 type InvoiceType = "VAT_INVOICE" | "PRO_FORMA";
 
-type Row = { id: string; description: string; qty: number; price: number };
+type Row = {
+  id: string;
+  description: string;
+  qty: number;
+  price: number;
+};
 
 type Customer = {
   id: string | number;
@@ -43,13 +52,17 @@ type Customer = {
   address?: string | null;
 };
 
+/* =========================================
+   Helpers
+========================================= */
+
 function n2(v: any) {
   const x = Number(v ?? 0);
   return Number.isFinite(x) ? x : 0;
 }
 
 function money(n: number) {
-  return `Rs ${n.toLocaleString("en-US", {
+  return `Rs ${n.toLocaleString("en-MU", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
@@ -61,6 +74,20 @@ function todayISO() {
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
+}
+
+function fmtDate(v?: string | null) {
+  if (!v) return "—";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+    const [yyyy, mm, dd] = v.split("-");
+    return `${dd}/${mm}/${yyyy}`;
+  }
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return String(v);
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
 }
 
 function pad4(n: number) {
@@ -96,14 +123,15 @@ function Chip({
 }) {
   const tones: Record<string, string> = {
     slate: "bg-slate-50 text-slate-700 ring-1 ring-slate-200",
-    orange: "bg-[#ff7a18]/10 text-[#c25708] ring-1 ring-[#ff7a18]/20",
+    orange: "bg-[#ff8a1e]/10 text-[#c25708] ring-1 ring-[#ff8a1e]/20",
     blue: "bg-blue-50 text-blue-700 ring-1 ring-blue-200",
     emerald: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
   };
+
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold",
+        "inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold",
         tones[tone],
         className
       )}
@@ -113,20 +141,22 @@ function Chip({
   );
 }
 
-function Card3D({ children, className }: { children: React.ReactNode; className?: string }) {
+function Surface({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
     <div
       className={cn(
-        "relative rounded-3xl bg-white",
-        "ring-1 ring-slate-200/80",
-        "shadow-[0_1px_0_rgba(15,23,42,0.08),0_18px_45px_rgba(15,23,42,0.10)]",
-        "before:pointer-events-none before:absolute before:inset-0 before:rounded-3xl before:opacity-90",
-        "before:bg-[radial-gradient(60%_60%_at_22%_10%,rgba(7,27,56,0.10),transparent_60%)]",
+        "relative overflow-hidden rounded-[28px] border border-slate-200/80 bg-white",
+        "shadow-[0_1px_0_rgba(15,23,42,0.04),0_20px_50px_rgba(15,23,42,0.08)]",
         className
       )}
     >
-      <div className="pointer-events-none absolute inset-0 rounded-3xl bg-[linear-gradient(180deg,rgba(255,255,255,0.85),transparent_55%)] opacity-55" />
-      <div className="relative">{children}</div>
+      {children}
     </div>
   );
 }
@@ -140,12 +170,12 @@ function SpotlightShell({
 }) {
   return (
     <div className="relative">
-      <div className="pointer-events-none absolute -inset-[2px] rounded-[22px] bg-[linear-gradient(90deg,rgba(255,122,24,0.55),rgba(255,122,24,0.10),rgba(255,122,24,0.55))]" />
+      <div className="pointer-events-none absolute -inset-[2px] rounded-[22px] bg-[linear-gradient(90deg,rgba(255,138,30,0.45),rgba(255,138,30,0.10),rgba(255,138,30,0.45))]" />
       <div
         className={cn(
           "pointer-events-none absolute -inset-6 rounded-[28px] opacity-0 transition-opacity duration-300",
           active && "opacity-100",
-          "bg-[radial-gradient(400px_140px_at_40%_10%,rgba(255,122,24,0.14),transparent_70%)]"
+          "bg-[radial-gradient(400px_140px_at_40%_10%,rgba(255,138,30,0.14),transparent_70%)]"
         )}
       />
       <div className="relative rounded-[20px] bg-white/80 backdrop-blur-xl ring-1 ring-slate-200/70 shadow-[0_12px_34px_rgba(2,6,23,0.08)]">
@@ -157,9 +187,59 @@ function SpotlightShell({
 
 function IconLabel({ icon: Icon, label }: { icon: React.ElementType; label: string }) {
   return (
-    <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+    <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
       <Icon className="size-4 text-slate-400" />
       <span>{label}</span>
+    </div>
+  );
+}
+
+function SummaryCard({
+  label,
+  value,
+  tone = "slate",
+  sub,
+}: {
+  label: string;
+  value: string;
+  tone?: "slate" | "navy" | "orange" | "emerald";
+  sub?: string;
+}) {
+  const tones: Record<string, string> = {
+    slate: "bg-slate-50 ring-slate-200 text-slate-900",
+    navy: "bg-[#071b38] text-white ring-white/10",
+    orange: "bg-[#ff8a1e] text-white ring-white/10",
+    emerald: "bg-emerald-50 ring-emerald-200 text-emerald-900",
+  };
+
+  return (
+    <div className={cn("rounded-[24px] p-4 ring-1 sm:p-5", tones[tone])}>
+      <div
+        className={cn(
+          "text-[10px] font-bold uppercase tracking-[0.18em]",
+          tone === "navy" || tone === "orange" ? "text-white/70" : "text-slate-500"
+        )}
+      >
+        {label}
+      </div>
+      <div
+        className={cn(
+          "mt-2 text-[22px] font-extrabold tracking-tight sm:text-[24px]",
+          tone === "navy" || tone === "orange" ? "text-white" : "text-slate-950"
+        )}
+      >
+        {value}
+      </div>
+      {sub ? (
+        <div
+          className={cn(
+            "mt-1 text-xs",
+            tone === "navy" || tone === "orange" ? "text-white/75" : "text-slate-600"
+          )}
+        >
+          {sub}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -339,7 +419,7 @@ export default function NewInvoicePage() {
     setErr("");
     try {
       await saveToServer("DRAFT");
-      setToast("Draft saved.");
+      setToast("Draft saved successfully.");
       window.setTimeout(() => setToast(null), 2200);
     } catch (e: any) {
       setErr(e?.message || "Failed to save draft");
@@ -492,7 +572,11 @@ export default function NewInvoicePage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [rows, customerId, invoiceNo, invoiceDate, invoiceType, invoiceId]);
 
-  function onRowKeyDown(e: React.KeyboardEvent, rowId: string, field: "desc" | "qty" | "price") {
+  function onRowKeyDown(
+    e: React.KeyboardEvent,
+    rowId: string,
+    field: "desc" | "qty" | "price"
+  ) {
     if (e.key !== "Enter" || e.shiftKey) return;
     e.preventDefault();
 
@@ -529,11 +613,14 @@ export default function NewInvoicePage() {
   const showPreview = true;
 
   return (
-    <div className="space-y-4">
-      <div className="relative overflow-hidden rounded-3xl ring-1 ring-slate-200 bg-white">
-        <div className="absolute inset-0 bg-[radial-gradient(900px_460px_at_12%_-20%,rgba(7,27,56,0.14),transparent_60%),radial-gradient(700px_420px_at_110%_-10%,rgba(255,122,24,0.14),transparent_60%),linear-gradient(180deg,rgba(248,250,252,1),rgba(255,255,255,1))]" />
-        <div className="relative px-5 py-4 sm:px-7 sm:py-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    <div className="space-y-5">
+      {/* Header */}
+      <Surface className="overflow-hidden">
+        <div className="absolute inset-0 bg-[linear-gradient(135deg,#071b38_0%,#0d2c59_48%,#163d73_100%)]" />
+        <div className="absolute inset-0 opacity-80 bg-[radial-gradient(900px_320px_at_-10%_-20%,rgba(255,255,255,0.14),transparent_55%),radial-gradient(700px_300px_at_110%_0%,rgba(255,153,51,0.20),transparent_50%)]" />
+
+        <div className="relative px-4 py-5 sm:px-6 sm:py-6 xl:px-7 xl:py-7">
+          <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <Chip tone="blue">
@@ -542,22 +629,26 @@ export default function NewInvoicePage() {
                 </Chip>
                 <Chip tone="orange">
                   <BadgeCheck className="size-3.5" />
-                  Invoice Creation
+                  Enterprise Invoice Builder
+                </Chip>
+                <Chip className="bg-white/12 text-white ring-white/15">
+                  <Sparkles className="size-3.5 text-white/85" />
+                  Premium Workflow
                 </Chip>
               </div>
 
-              <h1 className="mt-2 text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
-                New Invoice
+              <h1 className="mt-3 text-2xl font-extrabold tracking-tight text-white sm:text-3xl xl:text-[2rem]">
+                Create New Invoice
               </h1>
 
-              <div className="mt-1 text-sm text-slate-600">
-                <span className="font-semibold text-slate-800">MUR</span> •{" "}
-                <span className="text-slate-500">⌘K Customer • ⌥N Add row • ⌘S Save • ⌘↵ Issue</span>
-              </div>
+              <p className="mt-2 max-w-4xl text-sm leading-6 text-blue-50/90 sm:text-[15px]">
+                Luxury enterprise invoice builder for KS Contracting with keyboard-first entry,
+                large work-description fields, customer search, live totals, and real-time print-ready preview.
+              </p>
 
               {invoiceId ? (
-                <div className="mt-2 text-xs text-slate-500">
-                  Saved ID: <span className="font-mono text-slate-700">{invoiceId}</span>
+                <div className="mt-2 text-xs text-blue-100/80">
+                  Saved ID: <span className="font-mono text-white">{invoiceId}</span>
                 </div>
               ) : null}
             </div>
@@ -566,7 +657,7 @@ export default function NewInvoicePage() {
               <Link href="/sales/invoices">
                 <Button
                   variant="outline"
-                  className="rounded-2xl h-11 bg-white/70 shadow-sm hover:bg-white"
+                  className="h-11 rounded-2xl border-white/20 bg-white/10 px-4 text-white backdrop-blur-sm hover:bg-white/16 hover:text-white"
                   disabled={busy}
                 >
                   <ArrowLeft className="mr-2 size-4" />
@@ -578,61 +669,57 @@ export default function NewInvoicePage() {
                 onClick={onSaveDraft}
                 disabled={busy}
                 variant="outline"
-                className="rounded-2xl h-11 bg-white/70 shadow-sm hover:bg-white"
+                className="h-11 rounded-2xl border-white/20 bg-white/10 px-4 text-white backdrop-blur-sm hover:bg-white/16 hover:text-white"
                 title="Ctrl/Cmd + S"
               >
-                {saving ? (
-                  <Loader2 className="mr-2 size-4 animate-spin" />
-                ) : (
-                  <Save className="mr-2 size-4" />
-                )}
+                {saving ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Save className="mr-2 size-4" />}
                 Save Draft
               </Button>
 
               <Button
                 onClick={onIssue}
                 disabled={busy}
-                className="rounded-2xl h-11 bg-[#071b38] text-white hover:bg-[#06142b] shadow-[0_16px_44px_rgba(7,27,56,0.18)]"
+                className="h-11 rounded-2xl bg-[#ff8a1e] px-5 font-semibold text-white shadow-[0_18px_44px_rgba(255,138,30,0.24)] hover:bg-[#f07c0f]"
                 title="Ctrl/Cmd + Enter"
               >
-                {issuing ? (
-                  <Loader2 className="mr-2 size-4 animate-spin" />
-                ) : (
-                  <Send className="mr-2 size-4" />
-                )}
+                {issuing ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Send className="mr-2 size-4" />}
                 Issue & Print
               </Button>
             </div>
           </div>
 
-          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="mt-5 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex flex-wrap items-center gap-2">
-              <Chip tone="slate">
-                <FileText className="size-3.5" />
+              <Chip className="bg-white/12 text-white ring-white/15">
+                <FileText className="size-3.5 text-white/85" />
                 {invoiceType === "VAT_INVOICE" ? "VAT INVOICE" : "PRO FORMA INVOICE"}
               </Chip>
-              <Chip tone="slate">
-                <Hash className="size-3.5" />
+              <Chip className="bg-white/12 text-white ring-white/15">
+                <Hash className="size-3.5 text-white/85" />
                 {invoiceNo || "INV-—"}
               </Chip>
-              <Chip tone="slate">
-                <Calendar className="size-3.5" />
-                {invoiceDate}
+              <Chip className="bg-white/12 text-white ring-white/15">
+                <Calendar className="size-3.5 text-white/85" />
+                {fmtDate(invoiceDate)}
               </Chip>
-              <Chip tone="slate">
-                <Percent className="size-3.5" />
+              <Chip className="bg-white/12 text-white ring-white/15">
+                <Percent className="size-3.5 text-white/85" />
                 VAT 15%
               </Chip>
             </div>
 
-            {toast ? (
-              <div className="text-sm font-semibold text-emerald-700 bg-emerald-50 ring-1 ring-emerald-200 rounded-2xl px-4 py-2">
-                {toast}
-              </div>
-            ) : null}
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <Chip className="bg-white text-slate-700 ring-white/80">
+                <Command className="size-3.5 text-slate-500" />
+                ⌘K Customer
+              </Chip>
+              <Chip className="bg-white text-slate-700 ring-white/80">⌥N Add Row</Chip>
+              <Chip className="bg-white text-slate-700 ring-white/80">⌘S Save</Chip>
+              <Chip className="bg-white text-slate-700 ring-white/80">⌘↵ Issue</Chip>
+            </div>
           </div>
         </div>
-      </div>
+      </Surface>
 
       {err ? (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -640,31 +727,37 @@ export default function NewInvoicePage() {
         </div>
       ) : null}
 
-      <div className={cn("grid grid-cols-1 gap-4", showPreview && "xl:grid-cols-[1.2fr_0.8fr]")}>
+      <div className={cn("grid grid-cols-1 gap-4", showPreview && "2xl:grid-cols-[1.2fr_0.8fr]")}>
         <div className="space-y-4">
-          <Card3D className="p-5">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <div className="text-sm font-semibold text-slate-900">Invoice Details</div>
-                <div className="mt-0.5 text-sm text-slate-600">
-                  KS invoice format with fixed VAT 15%.
+          {/* Invoice details */}
+          <Surface>
+            <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="text-base font-bold tracking-tight text-slate-950">Invoice Details</div>
+                  <div className="mt-1 text-sm text-slate-600">
+                    Executive invoice setup with automatic numbering and fixed VAT control.
+                  </div>
                 </div>
+                <Chip tone="orange">VAT Fixed 15%</Chip>
               </div>
-              <Chip tone="orange">VAT Fixed 15%</Chip>
             </div>
 
-            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2 xl:grid-cols-3 sm:p-5">
               <div>
                 <IconLabel icon={FileText} label="Invoice Type" />
-                <select
-                  value={invoiceType}
-                  onChange={(e) => setInvoiceType(e.target.value as InvoiceType)}
-                  className="mt-1 h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-[#ff7a18]/25"
-                  disabled={busy}
-                >
-                  <option value="VAT_INVOICE">VAT INVOICE</option>
-                  <option value="PRO_FORMA">PRO FORMA INVOICE</option>
-                </select>
+                <div className="relative">
+                  <select
+                    value={invoiceType}
+                    onChange={(e) => setInvoiceType(e.target.value as InvoiceType)}
+                    className="h-12 w-full appearance-none rounded-2xl border border-slate-200 bg-white px-4 pr-10 text-sm font-semibold text-slate-900 outline-none transition focus:ring-2 focus:ring-[#ff8a1e]/25"
+                    disabled={busy}
+                  >
+                    <option value="VAT_INVOICE">VAT INVOICE</option>
+                    <option value="PRO_FORMA">PRO FORMA INVOICE</option>
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+                </div>
               </div>
 
               <div>
@@ -672,7 +765,7 @@ export default function NewInvoicePage() {
                 <Input
                   value={invoiceNo}
                   onChange={(e) => setInvoiceNo(e.target.value)}
-                  className="mt-1 h-11 rounded-2xl"
+                  className="h-12 rounded-2xl font-semibold"
                   disabled={busy}
                 />
               </div>
@@ -683,196 +776,215 @@ export default function NewInvoicePage() {
                   type="date"
                   value={invoiceDate}
                   onChange={(e) => setInvoiceDate(e.target.value)}
-                  className="mt-1 h-11 rounded-2xl"
+                  className="h-12 rounded-2xl"
                   disabled={busy}
                 />
               </div>
             </div>
+          </Surface>
 
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-              <div className="inline-flex items-center gap-2 text-xs text-slate-600">
-                <Command className="size-4 text-slate-500" />
-                <span>Keyboard-first invoice creation enabled</span>
-              </div>
-              <div className="text-xs text-slate-500">
-                Tip: Select customer with <span className="font-semibold">⌘K</span>
-              </div>
-            </div>
-          </Card3D>
-
-          <Card3D className="p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-sm font-semibold text-slate-900">Customer</div>
-                <div className="mt-0.5 text-sm text-slate-600">
-                  Search & select from <span className="font-semibold">/api/customers</span>
+          {/* Customer */}
+          <Surface>
+            <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-base font-bold tracking-tight text-slate-950">Customer & Site</div>
+                  <div className="mt-1 text-sm text-slate-600">
+                    Search and populate client records quickly from your customer register.
+                  </div>
                 </div>
-              </div>
-              <div className="hidden sm:flex items-center gap-2">
                 <Chip tone="orange" className="px-2.5 py-1">
                   ⌘K
                 </Chip>
               </div>
             </div>
 
-            <div ref={custBoxRef} className="mt-4">
-              <SpotlightShell active={spotlight}>
-                <div className="relative">
-                  <Search className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+            <div className="p-4 sm:p-5">
+              <div ref={custBoxRef}>
+                <IconLabel icon={Search} label="Search Customer" />
+                <SpotlightShell active={spotlight}>
+                  <div className="relative">
+                    <Search className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+                    <Input
+                      ref={custInputRef}
+                      value={custQuery}
+                      onChange={(e) => {
+                        setCustQuery(e.target.value);
+                        setCustOpen(true);
+                        setCustActiveIdx(0);
+                      }}
+                      onFocus={() => {
+                        setCustOpen(true);
+                        setSpotlight(true);
+                      }}
+                      onBlur={() => setSpotlight(false)}
+                      onKeyDown={onCustomerKeyDown}
+                      placeholder={custLoading ? "Loading customers..." : "Search name, VAT, BRN, address..."}
+                      className={cn(
+                        "h-12 rounded-[20px] border-0 bg-transparent pl-10 pr-3 shadow-none",
+                        "focus-visible:ring-2 focus-visible:ring-[#ff8a1e]/25"
+                      )}
+                      disabled={busy}
+                    />
+                  </div>
+                </SpotlightShell>
+
+                {custOpen && (
+                  <div className="mt-2 overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200 shadow-[0_18px_55px_rgba(2,6,23,0.12)]">
+                    <div className="max-h-[300px] overflow-auto">
+                      {filteredCustomers.length === 0 ? (
+                        <div className="px-4 py-4 text-sm text-slate-600">No customers found.</div>
+                      ) : (
+                        filteredCustomers.map((c, idx) => {
+                          const name = c.name ?? c.customer_name ?? "—";
+                          const active = idx === custActiveIdx;
+
+                          return (
+                            <button
+                              key={String(c.id ?? idx)}
+                              type="button"
+                              onMouseEnter={() => setCustActiveIdx(idx)}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => selectCustomer(c)}
+                              className={cn(
+                                "w-full border-b border-slate-100 px-4 py-3 text-left transition last:border-b-0",
+                                active ? "bg-[#ff8a1e]/6" : "hover:bg-slate-50"
+                              )}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="truncate text-sm font-semibold text-slate-900">{name}</div>
+                                  <div className="mt-0.5 truncate text-xs text-slate-600">
+                                    {c.address ? c.address : "—"}
+                                  </div>
+                                </div>
+                                <div className="shrink-0 text-right text-xs text-slate-500">
+                                  {c.vat_no ? <div>VAT: {c.vat_no}</div> : null}
+                                  {c.brn ? <div>BRN: {c.brn}</div> : null}
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <div>
+                  <IconLabel icon={Building2} label="Customer Name" />
                   <Input
-                    ref={custInputRef}
-                    value={custQuery}
-                    onChange={(e) => {
-                      setCustQuery(e.target.value);
-                      setCustOpen(true);
-                      setCustActiveIdx(0);
-                    }}
-                    onFocus={() => {
-                      setCustOpen(true);
-                      setSpotlight(true);
-                    }}
-                    onBlur={() => setSpotlight(false)}
-                    onKeyDown={onCustomerKeyDown}
-                    placeholder={custLoading ? "Loading customers…" : "Search name, VAT, BRN, address…"}
-                    className={cn(
-                      "h-11 rounded-[20px] pl-10 pr-3 border-0 bg-transparent",
-                      "focus-visible:ring-2 focus-visible:ring-[#ff7a18]/25",
-                      "shadow-none"
-                    )}
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                    className="h-12 rounded-2xl"
                     disabled={busy}
                   />
                 </div>
-              </SpotlightShell>
 
-              {custOpen && (
-                <div className="mt-2 overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200 shadow-[0_18px_55px_rgba(2,6,23,0.12)]">
-                  <div className="max-h-[280px] overflow-auto">
-                    {filteredCustomers.length === 0 ? (
-                      <div className="px-4 py-4 text-sm text-slate-600">No customers found.</div>
-                    ) : (
-                      filteredCustomers.map((c, idx) => {
-                        const name = c.name ?? c.customer_name ?? "—";
-                        const active = idx === custActiveIdx;
-                        return (
-                          <button
-                            key={String(c.id ?? idx)}
-                            type="button"
-                            onMouseEnter={() => setCustActiveIdx(idx)}
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => selectCustomer(c)}
-                            className={cn(
-                              "w-full px-4 py-3 text-left transition",
-                              "border-b last:border-b-0 border-slate-100",
-                              active ? "bg-[#ff7a18]/6" : "hover:bg-slate-50"
-                            )}
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="truncate text-sm font-semibold text-slate-900">{name}</div>
-                                <div className="mt-0.5 truncate text-xs text-slate-600">
-                                  {c.address ? c.address : "—"}
-                                </div>
-                              </div>
-                              <div className="shrink-0 text-right text-xs text-slate-500">
-                                {c.vat_no ? <div>VAT: {c.vat_no}</div> : null}
-                                {c.brn ? <div>BRN: {c.brn}</div> : null}
-                              </div>
-                            </div>
-                          </button>
-                        );
-                      })
-                    )}
+                <div>
+                  <IconLabel icon={MapPin} label="Site Address" />
+                  <Input
+                    value={siteAddress}
+                    onChange={(e) => setSiteAddress(e.target.value)}
+                    className="h-12 rounded-2xl"
+                    disabled={busy}
+                    placeholder="Albion"
+                  />
+                </div>
+
+                <div>
+                  <IconLabel icon={Percent} label="Client VAT Reg. No." />
+                  <Input
+                    value={customerVat}
+                    onChange={(e) => setCustomerVat(e.target.value)}
+                    className="h-12 rounded-2xl"
+                    disabled={busy}
+                  />
+                </div>
+
+                <div>
+                  <IconLabel icon={Hash} label="Client BRN No." />
+                  <Input
+                    value={customerBrn}
+                    onChange={(e) => setCustomerBrn(e.target.value)}
+                    className="h-12 rounded-2xl"
+                    disabled={busy}
+                  />
+                </div>
+
+                <div className="lg:col-span-2">
+                  <IconLabel icon={Building2} label="Customer Address" />
+                  <textarea
+                    value={customerAddress}
+                    onChange={(e) => setCustomerAddress(e.target.value)}
+                    className="min-h-[96px] w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:ring-2 focus:ring-[#ff8a1e]/25"
+                    disabled={busy}
+                    placeholder="Customer address"
+                  />
+                </div>
+              </div>
+            </div>
+          </Surface>
+
+          {/* Items */}
+          <Surface>
+            <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <div className="text-base font-bold tracking-tight text-slate-950">Invoice Items</div>
+                  <div className="mt-1 text-sm text-slate-600">
+                    Large description entry made for detailed contracting works, bill of work notes,
+                    material scope, and quotation references.
                   </div>
                 </div>
-              )}
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 rounded-2xl"
+                  onClick={() => addRow("desc")}
+                  title="Alt + N"
+                  disabled={busy}
+                >
+                  <Plus className="mr-2 size-4" />
+                  Add Item
+                </Button>
+              </div>
             </div>
 
-            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-              <div>
-                <IconLabel icon={Building2} label="Customer Name" />
-                <Input
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                  className="mt-1 h-11 rounded-2xl"
-                  disabled={busy}
-                />
-              </div>
-
-              <div>
-                <IconLabel icon={MapPin} label="Site Address" />
-                <Input
-                  value={siteAddress}
-                  onChange={(e) => setSiteAddress(e.target.value)}
-                  className="mt-1 h-11 rounded-2xl"
-                  disabled={busy}
-                  placeholder="Albion"
-                />
-              </div>
-
-              <div>
-                <IconLabel icon={Percent} label="Client VAT Reg. No." />
-                <Input
-                  value={customerVat}
-                  onChange={(e) => setCustomerVat(e.target.value)}
-                  className="mt-1 h-11 rounded-2xl"
-                  disabled={busy}
-                />
-              </div>
-
-              <div>
-                <IconLabel icon={Hash} label="Client BRN No." />
-                <Input
-                  value={customerBrn}
-                  onChange={(e) => setCustomerBrn(e.target.value)}
-                  className="mt-1 h-11 rounded-2xl"
-                  disabled={busy}
-                />
-              </div>
-
-              <div className="md:col-span-2">
-                <IconLabel icon={Building2} label="Customer Address" />
-                <Input
-                  value={customerAddress}
-                  onChange={(e) => setCustomerAddress(e.target.value)}
-                  className="mt-1 h-11 rounded-2xl"
-                  disabled={busy}
-                />
-              </div>
-            </div>
-          </Card3D>
-
-          <Card3D className="p-5">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <div className="text-sm font-semibold text-slate-900">Invoice Items</div>
-                <div className="mt-0.5 text-sm text-slate-600">
-                  Bigger description field for KS work details.
-                </div>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                className="rounded-2xl h-11"
-                onClick={() => addRow("desc")}
-                title="Alt + N"
-                disabled={busy}
-              >
-                <Plus className="mr-2 size-4" />
-                Add Item
-              </Button>
-            </div>
-
-            <div className="mt-4 space-y-4">
-              {rows.map((r) => {
+            <div className="space-y-4 p-4 sm:p-5">
+              {rows.map((r, index) => {
                 const amt = n2(r.qty) * n2(r.price);
                 return (
                   <div
                     key={r.id}
-                    className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4"
+                    className="rounded-[24px] border border-slate-200 bg-slate-50/70 p-4 shadow-[0_1px_0_rgba(15,23,42,0.03)]"
                   >
-                    <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_120px_160px_auto] md:items-start">
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                      <div className="inline-flex items-center gap-2 text-sm font-bold text-slate-900">
+                        <ClipboardList className="size-4 text-slate-500" />
+                        Item {index + 1}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => removeRow(r.id)}
+                        className={cn(
+                          "grid h-10 w-10 place-items-center rounded-2xl bg-white ring-1 ring-slate-200 text-slate-500 transition hover:bg-slate-100",
+                          busy && "pointer-events-none opacity-60"
+                        )}
+                        aria-label="Remove item"
+                        title="Remove"
+                      >
+                        <Trash2 className="size-4" />
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_140px_180px]">
                       <div>
-                        <IconLabel icon={FileText} label="Description" />
+                        <IconLabel icon={FileText} label="Description / Scope of Work" />
                         <textarea
                           ref={(el) => {
                             descRefs.current[r.id] = el;
@@ -880,8 +992,11 @@ export default function NewInvoicePage() {
                           value={r.description}
                           onChange={(e) => updateRow(r.id, { description: e.target.value })}
                           onKeyDown={(e) => onRowKeyDown(e, r.id, "desc")}
-                          className="mt-1 min-h-[140px] w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-[#ff7a18]/25"
-                          placeholder="Building or false ceiling as per quotation sent..."
+                          className="min-h-[180px] w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:ring-2 focus:ring-[#ff8a1e]/25"
+                          placeholder="Example:
+Supply and installation of false ceiling works as per approved quotation.
+Include labour, fixing accessories, finishing, and site coordination details.
+You can also add phases, materials, quotation reference, and special notes here."
                           disabled={busy}
                         />
                       </div>
@@ -896,13 +1011,13 @@ export default function NewInvoicePage() {
                           value={r.qty}
                           onChange={(e) => updateRow(r.id, { qty: Number(e.target.value || 0) })}
                           onKeyDown={(e) => onRowKeyDown(e, r.id, "qty")}
-                          className="mt-1 h-11 rounded-2xl text-right"
+                          className="h-12 rounded-2xl text-right font-semibold"
                           disabled={busy}
                         />
                       </div>
 
                       <div>
-                        <IconLabel icon={Percent} label="Unit Price" />
+                        <IconLabel icon={Wallet} label="Unit Price (Rs)" />
                         <Input
                           ref={(el) => {
                             priceRefs.current[r.id] = el;
@@ -911,172 +1026,152 @@ export default function NewInvoicePage() {
                           value={r.price}
                           onChange={(e) => updateRow(r.id, { price: Number(e.target.value || 0) })}
                           onKeyDown={(e) => onRowKeyDown(e, r.id, "price")}
-                          className="mt-1 h-11 rounded-2xl text-right"
+                          className="h-12 rounded-2xl text-right font-semibold"
                           disabled={busy}
                         />
-                      </div>
 
-                      <div className="flex flex-col items-stretch gap-2 md:pt-6">
-                        <div className="rounded-2xl bg-white px-4 py-3 text-right ring-1 ring-slate-200">
-                          <div className="text-[11px] font-semibold text-slate-500">Amount</div>
-                          <div className="text-sm font-extrabold text-slate-900">{money(amt)}</div>
+                        <div className="mt-3 rounded-2xl bg-white px-4 py-3 text-right ring-1 ring-slate-200">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                            Item Amount
+                          </div>
+                          <div className="mt-1 text-base font-extrabold text-slate-950">{money(amt)}</div>
                         </div>
-
-                        <button
-                          type="button"
-                          onClick={() => removeRow(r.id)}
-                          className={cn(
-                            "grid h-11 place-items-center rounded-2xl",
-                            "bg-white ring-1 ring-slate-200 text-slate-500 hover:bg-slate-100",
-                            busy && "pointer-events-none opacity-60"
-                          )}
-                          aria-label="Remove item"
-                          title="Remove"
-                        >
-                          <Trash2 className="size-4" />
-                        </button>
                       </div>
                     </div>
                   </div>
                 );
               })}
-            </div>
 
-            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-              <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                <div className="text-xs font-semibold text-slate-500">Sub Total</div>
-                <div className="mt-1 text-lg font-extrabold text-slate-900">{money(subtotal)}</div>
-              </div>
-
-              <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                <div className="text-xs font-semibold text-slate-500">VAT 15%</div>
-                <div className="mt-1 text-lg font-extrabold text-slate-900">{money(vat)}</div>
-              </div>
-
-              <div className="rounded-2xl bg-[#071b38] p-4 text-white shadow-[0_18px_40px_rgba(2,6,23,0.18)] ring-1 ring-white/10">
-                <div className="text-xs font-semibold text-white/70">TOTAL</div>
-                <div className="mt-1 text-lg font-extrabold">{money(total)}</div>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <SummaryCard label="Sub Total" value={money(subtotal)} />
+                <SummaryCard label="VAT 15%" value={money(vat)} />
+                <SummaryCard label="Total" value={money(total)} tone="navy" />
               </div>
             </div>
-          </Card3D>
+          </Surface>
         </div>
 
+        {/* Preview */}
         {showPreview && (
-          <div className="xl:sticky xl:top-[92px] h-fit">
-            <Card3D className="p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-sm font-semibold text-slate-900">Live Preview</div>
-                  <div className="mt-0.5 text-sm text-slate-600">
-                    KS paper-style preview
+          <div className="2xl:sticky 2xl:top-[92px] h-fit">
+            <Surface>
+              <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-base font-bold tracking-tight text-slate-950">Live Preview</div>
+                    <div className="mt-1 text-sm text-slate-600">
+                      Real-time paper-style invoice preview
+                    </div>
                   </div>
+                  <Chip tone="orange">
+                    <Eye className="size-3.5" />
+                    Preview
+                  </Chip>
                 </div>
-                <Chip tone="orange" className="px-3 py-1">
-                  <Eye className="size-3.5" />
-                  Preview
-                </Chip>
               </div>
 
-              <div className="mt-4 overflow-hidden rounded-2xl border border-slate-300 bg-white">
-                <div className="border-b border-slate-300 px-4 py-4 text-center">
-                  <div className="text-lg font-extrabold text-slate-900">KS CONTRACTING LTD</div>
-                  <div className="mt-1 text-xs text-slate-600">
-                    Lot No. 15, Morcellement Petite Bretagne, Albion
-                  </div>
-                  <div className="text-xs text-slate-600">
-                    Tel: 59416756 • Email: ks.contracting@hotmail.com
-                  </div>
-                  <div className="text-xs text-slate-600">BRN: 18160190 • VAT: 27658608</div>
-                </div>
-
-                <div className="px-4 py-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="text-base font-extrabold text-slate-900">
-                      {invoiceType === "VAT_INVOICE" ? "VAT INVOICE" : "PRO FORMA INVOICE"}
-                    </div>
-                    <div className="text-right text-sm">
-                      <div className="font-semibold text-slate-600">No.</div>
-                      <div className="text-xl font-extrabold text-slate-900">{invoiceNo || "—"}</div>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 grid grid-cols-1 gap-3 text-sm">
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                      <div>
-                        <div className="text-xs text-slate-500">Name</div>
-                        <div className="font-semibold text-slate-900">{customerName || "—"}</div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-500">Date</div>
-                        <div className="font-semibold text-slate-900">{invoiceDate || "—"}</div>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                      <div>
-                        <div className="text-xs text-slate-500">Client's VAT Reg. No.</div>
-                        <div className="font-semibold text-slate-900">{customerVat || "—"}</div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-500">Client's BRN No.</div>
-                        <div className="font-semibold text-slate-900">{customerBrn || "—"}</div>
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="text-xs text-slate-500">Site Address</div>
-                      <div className="font-semibold text-slate-900">{siteAddress || "—"}</div>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 overflow-hidden border border-slate-300">
-                    <div className="grid grid-cols-12 border-b border-slate-300 bg-slate-50 px-3 py-2 text-[11px] font-bold text-slate-700">
-                      <div className="col-span-2">Qty.</div>
-                      <div className="col-span-7">DESCRIPTION</div>
-                      <div className="col-span-3 text-right">AMOUNT</div>
-                    </div>
-
-                    <div className="divide-y divide-slate-200">
-                      {rows.map((r) => (
-                        <div key={r.id} className="grid grid-cols-12 px-3 py-3 text-xs">
-                          <div className="col-span-2 font-semibold text-slate-800">{n2(r.qty)}</div>
-                          <div className="col-span-7 whitespace-pre-wrap break-words text-slate-800">
-                            {r.description || "—"}
-                          </div>
-                          <div className="col-span-3 text-right font-bold text-slate-900">
-                            {money(n2(r.qty) * n2(r.price))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="mt-4 ml-auto w-full max-w-[260px] space-y-2 text-sm">
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-600">Sub Total</span>
-                      <span className="font-semibold text-slate-900">{money(subtotal)}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-600">VAT 15%</span>
-                      <span className="font-semibold text-slate-900">{money(vat)}</span>
-                    </div>
-                    <div className="border-t border-slate-300 pt-2 flex items-center justify-between">
-                      <span className="font-bold text-slate-900">TOTAL</span>
-                      <span className="font-extrabold text-slate-900">{money(total)}</span>
-                    </div>
-                  </div>
-
-                  <div className="mt-5 rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-200">
-                    <div className="text-xs font-semibold text-slate-700">Payment Reference</div>
+              <div className="p-4 sm:p-5">
+                <div className="overflow-hidden rounded-[24px] border border-slate-300 bg-white">
+                  <div className="border-b border-slate-300 px-4 py-5 text-center">
+                    <div className="text-lg font-extrabold text-slate-900">KS CONTRACTING LTD</div>
                     <div className="mt-1 text-xs text-slate-600">
-                      Please use <span className="font-semibold text-slate-900">{invoiceNo || "—"}</span> as
-                      payment reference.
+                      Lot No. 15, Morcellement Petite Bretagne, Albion
                     </div>
-                    <div className="mt-1 text-xs text-slate-600">MCB 000446509687</div>
+                    <div className="text-xs text-slate-600">
+                      Tel: 59416756 • Email: ks.contracting@hotmail.com
+                    </div>
+                    <div className="text-xs text-slate-600">BRN: 18160190 • VAT: 27658608</div>
+                  </div>
+
+                  <div className="px-4 py-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="text-base font-extrabold text-slate-900">
+                        {invoiceType === "VAT_INVOICE" ? "VAT INVOICE" : "PRO FORMA INVOICE"}
+                      </div>
+                      <div className="text-right text-sm">
+                        <div className="font-semibold text-slate-500">No.</div>
+                        <div className="text-xl font-extrabold text-slate-900">{invoiceNo || "—"}</div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-1 gap-3 text-sm">
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <div>
+                          <div className="text-xs text-slate-500">Name</div>
+                          <div className="font-semibold text-slate-900">{customerName || "—"}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-slate-500">Date</div>
+                          <div className="font-semibold text-slate-900">{fmtDate(invoiceDate) || "—"}</div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <div>
+                          <div className="text-xs text-slate-500">Client's VAT Reg. No.</div>
+                          <div className="font-semibold text-slate-900">{customerVat || "—"}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-slate-500">Client's BRN No.</div>
+                          <div className="font-semibold text-slate-900">{customerBrn || "—"}</div>
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-xs text-slate-500">Site Address</div>
+                        <div className="font-semibold text-slate-900">{siteAddress || "—"}</div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 overflow-hidden border border-slate-300">
+                      <div className="grid grid-cols-12 border-b border-slate-300 bg-slate-50 px-3 py-2 text-[11px] font-bold text-slate-700">
+                        <div className="col-span-2">Qty.</div>
+                        <div className="col-span-7">Description</div>
+                        <div className="col-span-3 text-right">Amount</div>
+                      </div>
+
+                      <div className="divide-y divide-slate-200">
+                        {rows.map((r) => (
+                          <div key={r.id} className="grid grid-cols-12 px-3 py-3 text-xs">
+                            <div className="col-span-2 font-semibold text-slate-800">{n2(r.qty)}</div>
+                            <div className="col-span-7 whitespace-pre-wrap break-words text-slate-800">
+                              {r.description || "—"}
+                            </div>
+                            <div className="col-span-3 text-right font-bold text-slate-900">
+                              {money(n2(r.qty) * n2(r.price))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="mt-4 ml-auto w-full max-w-[280px] space-y-2 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-600">Sub Total</span>
+                        <span className="font-semibold text-slate-900">{money(subtotal)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-600">VAT 15%</span>
+                        <span className="font-semibold text-slate-900">{money(vat)}</span>
+                      </div>
+                      <div className="border-t border-slate-300 pt-2 flex items-center justify-between">
+                        <span className="font-bold text-slate-900">TOTAL</span>
+                        <span className="font-extrabold text-slate-900">{money(total)}</span>
+                      </div>
+                    </div>
+
+                    <div className="mt-5 rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-200">
+                      <div className="text-xs font-semibold text-slate-700">Payment Reference</div>
+                      <div className="mt-1 text-xs text-slate-600">
+                        Please use <span className="font-semibold text-slate-900">{invoiceNo || "—"}</span> as
+                        payment reference.
+                      </div>
+                      <div className="mt-1 text-xs text-slate-600">MCB 000446509687</div>
+                    </div>
                   </div>
                 </div>
               </div>
-            </Card3D>
+            </Surface>
           </div>
         )}
       </div>
