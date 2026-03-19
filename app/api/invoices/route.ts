@@ -21,14 +21,21 @@ function n2(v: any) {
   return Number.isFinite(x) ? x : 0;
 }
 
+function qtyForCalc(v: any) {
+  const s = String(v ?? "").trim();
+  if (!s) return 1;
+  const x = Number(s);
+  return Number.isFinite(x) ? x : 1;
+}
+
 function normalizeInvoiceType(v: any) {
   const s = String(v ?? "").trim().toUpperCase();
 
-  if (s === "PRO_FORMA" || s === "PROFORMA") return "PROFORMA";
-  if (s === "VAT_INVOICE" || s === "VAT") return "VAT";
+  if (s === "PRO_FORMA" || s === "PROFORMA") return "PRO_FORMA";
+  if (s === "VAT_INVOICE" || s === "VAT") return "VAT_INVOICE";
   if (s === "STANDARD") return "STANDARD";
 
-  return "STANDARD";
+  return "VAT_INVOICE";
 }
 
 function normalizeStatus(v: any) {
@@ -51,8 +58,12 @@ function normalizeStatus(v: any) {
  *   status?: "DRAFT" | "ISSUED" | "PAID" | "PARTIALLY_PAID" | "VOID",
  *   invoice_type?: "STANDARD" | "VAT" | "PROFORMA" | legacy values,
  *   invoice_date: string,
- *   customer_id: number,
- *   site_address?: string,
+ *   customer_id?: number | null,
+ *   customer_name?: string | null,
+ *   customer_vat?: string | null,
+ *   customer_brn?: string | null,
+ *   customer_address?: string | null,
+ *   site_address?: string | null,
  *   notes?: string,
  *   rows: [{ description, qty, price }]
  * }
@@ -69,16 +80,43 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
     const admin = createSupabaseAdminClient();
 
+    const invoice_no = String(body.invoice_no ?? "").trim();
+    if (!invoice_no) {
+      return jsonError(400, { error: "invoice_no is required" });
+    }
+
     const invoiceId = String(body.id ?? "").trim() || null;
 
-    const customerIdNum = Number(body.customer_id);
-    if (!Number.isFinite(customerIdNum) || customerIdNum <= 0) {
-      return jsonError(400, { error: "customer_id (bigint) is required" });
-    }
+    const rawCustomerId = body.customer_id;
+    const customerIdNum =
+      rawCustomerId === null || rawCustomerId === undefined || rawCustomerId === ""
+        ? null
+        : Number(rawCustomerId);
+
+    const customer_name =
+      typeof body.customer_name === "string" ? body.customer_name.trim() || null : null;
+
+    const customer_vat =
+      typeof body.customer_vat === "string" ? body.customer_vat.trim() || null : null;
+
+    const customer_brn =
+      typeof body.customer_brn === "string" ? body.customer_brn.trim() || null : null;
+
+    const customer_address =
+      typeof body.customer_address === "string" ? body.customer_address.trim() || null : null;
 
     const invoice_date = String(body.invoice_date ?? "").trim();
     if (!invoice_date) {
       return jsonError(400, { error: "invoice_date is required (yyyy-mm-dd)" });
+    }
+
+    const hasCustomerId = Number.isFinite(customerIdNum as number) && (customerIdNum as number) > 0;
+    const hasManualCustomer = !!customer_name;
+
+    if (!hasCustomerId && !hasManualCustomer) {
+      return jsonError(400, {
+        error: "Either customer_id or customer_name is required",
+      });
     }
 
     const invoice_type = normalizeInvoiceType(body.invoice_type);
@@ -88,23 +126,29 @@ export async function POST(req: Request) {
     const site_address =
       typeof body.site_address === "string" ? body.site_address.trim() || null : null;
 
-    // KS rule: VAT fixed at 15%
     const vat_rate = 0.15;
 
     const rows = Array.isArray(body.rows) ? body.rows : [];
     const cleanRows = rows
-      .map((r: any) => ({
-        description: String(r.description ?? "").trim(),
-        qty: n2(r.qty),
-        unit_price_excl_vat: n2(r.price),
-      }))
-      .filter((r: any) => r.description.length > 0 && r.qty > 0);
+    .map((r: any) => {
+    const description = String(r.description ?? "").trim();
+    const rawQty = String(r.qty ?? "").trim();
+    const rawPrice = String(r.price ?? "").trim();
 
-    if (cleanRows.length === 0) {
-      return jsonError(400, {
-        error: "At least one invoice item (description + qty) is required.",
-      });
-    }
+    return {
+      description,
+      qty: rawQty === "" ? 1 : qtyForCalc(r.qty),
+      unit_price_excl_vat: n2(r.price),
+      hasAnyValue: description.length > 0 || rawQty !== "" || rawPrice !== "",
+    };
+  })
+  .filter((r: any) => r.hasAnyValue && r.description.length > 0 && r.qty > 0);
+
+if (cleanRows.length === 0) {
+  return jsonError(400, {
+    error: "At least one invoice item is required.",
+  });
+}
 
     const computedSubtotal = cleanRows.reduce(
       (s: number, r: any) => s + n2(r.qty) * n2(r.unit_price_excl_vat),
@@ -125,27 +169,40 @@ export async function POST(req: Request) {
 
     let savedInvoice: any = null;
 
+    const invoicePayload = {
+      invoice_no,
+      customer_id: hasCustomerId ? customerIdNum : null,
+      customer_name,
+      customer_vat,
+      customer_brn,
+      customer_address,
+      invoice_type,
+      invoice_date,
+      site_address,
+      status: finalStatus,
+      notes,
+      subtotal: computedSubtotal,
+      vat_amount: computedVat,
+      total_amount: computedTotal,
+      paid_amount,
+      balance_amount,
+    };
+
     if (!invoiceId) {
       const { data, error } = await admin
         .from("invoices")
         .insert({
-          customer_id: customerIdNum,
-          invoice_type,
-          invoice_date,
-          site_address,
-          status: finalStatus,
-          notes,
-          subtotal: computedSubtotal,
-          vat_amount: computedVat,
-          total_amount: computedTotal,
-          paid_amount,
-          balance_amount,
+          ...invoicePayload,
           created_by: userRes.user.id,
         })
         .select(`
           id,
           invoice_no,
           customer_id,
+          customer_name,
+          customer_vat,
+          customer_brn,
+          customer_address,
           invoice_type,
           invoice_date,
           site_address,
@@ -171,25 +228,17 @@ export async function POST(req: Request) {
     } else {
       const { data, error } = await admin
         .from("invoices")
-        .update({
-          customer_id: customerIdNum,
-          invoice_type,
-          invoice_date,
-          site_address,
-          status: finalStatus,
-          notes,
-          subtotal: computedSubtotal,
-          vat_amount: computedVat,
-          total_amount: computedTotal,
-          paid_amount,
-          balance_amount,
-        })
+        .update(invoicePayload)
         .eq("id", invoiceId)
         .eq("created_by", userRes.user.id)
         .select(`
           id,
           invoice_no,
           customer_id,
+          customer_name,
+          customer_vat,
+          customer_brn,
+          customer_address,
           invoice_type,
           invoice_date,
           site_address,
@@ -296,6 +345,10 @@ export async function GET(req: Request) {
         id,
         invoice_no,
         customer_id,
+        customer_name,
+        customer_vat,
+        customer_brn,
+        customer_address,
         invoice_type,
         invoice_date,
         site_address,
@@ -350,13 +403,17 @@ export async function GET(req: Request) {
     }
 
     const allRows = invoices.map((r: any) => {
-      const customer = customerMap.get(Number(r.customer_id));
+      const linkedCustomer = r.customer_id ? customerMap.get(Number(r.customer_id)) : null;
+      const resolvedName = linkedCustomer?.name ?? r.customer_name ?? null;
 
       return {
         id: r.id,
         invoice_no: r.invoice_no,
         customer_id: r.customer_id,
-        customer_name: customer?.name ?? null,
+        customer_name: resolvedName,
+        customer_vat: r.customer_vat ?? null,
+        customer_brn: r.customer_brn ?? null,
+        customer_address: r.customer_address ?? null,
         invoice_type: r.invoice_type ?? "STANDARD",
         invoice_date: r.invoice_date ?? null,
         site_address: r.site_address ?? null,
@@ -378,7 +435,12 @@ export async function GET(req: Request) {
       filtered = filtered.filter((r: any) => {
         const invoiceNo = String(r.invoice_no ?? "").toLowerCase();
         const customerName = String(r.customer_name ?? "").toLowerCase();
-        return invoiceNo.includes(needle) || customerName.includes(needle);
+        const siteAddress = String(r.site_address ?? "").toLowerCase();
+        return (
+          invoiceNo.includes(needle) ||
+          customerName.includes(needle) ||
+          siteAddress.includes(needle)
+        );
       });
     }
 

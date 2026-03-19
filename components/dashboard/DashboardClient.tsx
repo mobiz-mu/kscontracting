@@ -3,26 +3,23 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import {
-  CartesianGrid,
-  Line,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
+  CartesianGrid,
+  AreaChart,
+  Area,
   BarChart,
   Bar,
   PieChart,
   Pie,
   Cell,
-  Legend,
-  AreaChart,
-  Area,
 } from "recharts";
 import {
   RefreshCw,
   ArrowUpRight,
   ArrowDownRight,
-  Sparkles,
   FileText,
   Users,
   BadgePercent,
@@ -33,7 +30,12 @@ import {
   Building2,
   TrendingUp,
   ShieldCheck,
+  Sparkles,
+  Receipt,
+  AlertTriangle,
+  Landmark,
 } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -41,35 +43,15 @@ import { cn } from "@/lib/utils";
    Types
 ========================= */
 
-type Accent = "navy" | "orange" | "muted" | "green" | "neutral";
+type Accent = "navy" | "orange" | "green" | "slate";
 
 type Kpi = {
   label: string;
   value: string;
-  note?: string;
-  accent?: Accent;
   delta?: string;
   trend?: "up" | "down" | "flat";
-};
-
-type SeriesPoint = {
-  name: string;
-  sales: number;
-  expenses: number;
-  invoices: number;
-  cash: number;
-};
-
-type AgingBucket = { name: string; value: number };
-type StatusSlice = { name: string; value: number };
-
-type DueRow = {
-  customer: string;
-  totalDue: number;
-  overdue30: number;
-  overdue60: number;
-  overdue90: number;
-  lastInvoice: string;
+  accent?: Accent;
+  icon: React.ElementType;
 };
 
 type InvoiceRow = {
@@ -77,8 +59,12 @@ type InvoiceRow = {
   invoice_no: string;
   customer_id?: number | null;
   customer_name?: string | null;
+  customer_vat?: string | null;
+  customer_brn?: string | null;
+  customer_address?: string | null;
   invoice_date?: string | null;
   due_date?: string | null;
+  site_address?: string | null;
   status?: string | null;
   subtotal?: number | null;
   vat_amount?: number | null;
@@ -138,21 +124,31 @@ type ApiListResponse<T> = {
   error?: any;
 };
 
-type MonthlyAccumulator = {
-  sales: number;
-  expenses: number;
-  invoices: number;
-  cash: number;
+type SeriesPoint = {
+  label: string;
+  revenue: number;
+  collections: number;
+  credits: number;
+  dues: number;
 };
 
-type CustomerDueAccumulator = {
+type StatusSlice = {
+  name: string;
+  value: number;
+};
+
+type AgingBucket = {
+  name: string;
+  value: number;
+};
+
+type DueRow = {
   customer: string;
   totalDue: number;
   overdue30: number;
   overdue60: number;
   overdue90: number;
   lastInvoice: string;
-  lastInvoiceDateTs: number;
 };
 
 /* =========================
@@ -171,40 +167,12 @@ function money(n: number) {
   })}`;
 }
 
-function compactMoney(n: number) {
+function moneyShort(n: number) {
   const abs = Math.abs(n);
   if (abs >= 1_000_000_000) return `Rs ${(n / 1_000_000_000).toFixed(1)}B`;
   if (abs >= 1_000_000) return `Rs ${(n / 1_000_000).toFixed(1)}M`;
   if (abs >= 1_000) return `Rs ${(n / 1_000).toFixed(1)}K`;
   return `Rs ${n.toFixed(0)}`;
-}
-
-function fmtLastSync(d: Date) {
-  const dd = d.toLocaleString(undefined, { day: "2-digit" });
-  const mmm = d.toLocaleString(undefined, { month: "short" });
-  const yyyy = d.toLocaleString(undefined, { year: "numeric" });
-  const hh = d.toLocaleString(undefined, { hour: "2-digit", hour12: false });
-  const mm = d.toLocaleString(undefined, { minute: "2-digit" });
-  const ampm = d
-    .toLocaleString(undefined, { hour: "numeric", hour12: true })
-    .toLowerCase()
-    .includes("pm")
-    ? "pm"
-    : "am";
-
-  return `Last Sync at ${dd} ${mmm} ${yyyy}, ${hh}:${mm} ${ampm}`;
-}
-
-function clamp(n: number, a: number, b: number) {
-  return Math.max(a, Math.min(b, n));
-}
-
-function brandTone(a?: Accent) {
-  if (a === "orange") return "bg-[#ff8a1e]/12 text-[#c25708] ring-1 ring-[#ff8a1e]/22";
-  if (a === "navy") return "bg-[#071b38]/10 text-[#071b38] ring-1 ring-[#071b38]/18";
-  if (a === "green") return "bg-emerald-500/10 text-emerald-700 ring-1 ring-emerald-500/20";
-  if (a === "muted") return "bg-slate-100 text-slate-700 ring-1 ring-slate-200";
-  return "bg-slate-50 text-slate-700 ring-1 ring-slate-200";
 }
 
 function safeDate(v?: string | null) {
@@ -213,16 +181,14 @@ function safeDate(v?: string | null) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-function isSameMonth(a: Date, b: Date) {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
-}
-
-function monthKey(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function monthLabel(d: Date) {
-  return d.toLocaleString(undefined, { month: "short" });
+function fmtDateTime(v?: Date | null) {
+  const d = v ?? new Date();
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${dd}/${mm}/${yyyy} • ${hh}:${mi}`;
 }
 
 function startOfMonth(d: Date) {
@@ -237,25 +203,45 @@ function addMonths(d: Date, delta: number) {
   return new Date(d.getFullYear(), d.getMonth() + delta, 1);
 }
 
-function isOverdueRow(inv: InvoiceRow) {
-  const balance = n2(inv.balance_amount);
+function isSameMonth(a: Date, b: Date) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
+}
+
+function monthKey(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthLabel(d: Date) {
+  return d.toLocaleString("en-GB", { month: "short" });
+}
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function isOverdue(inv: InvoiceRow) {
   const due = safeDate(inv.due_date);
-  if (!(balance > 0) || !due) return false;
+  const balance = n2(inv.balance_amount);
+  if (!due || balance <= 0) return false;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  due.setHours(0, 0, 0, 0);
   return due.getTime() < today.getTime();
 }
 
 function daysPastDue(inv: InvoiceRow) {
-  const balance = n2(inv.balance_amount);
   const due = safeDate(inv.due_date);
-  if (!(balance > 0) || !due) return 0;
+  const balance = n2(inv.balance_amount);
+  if (!due || balance <= 0) return 0;
+
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   due.setHours(0, 0, 0, 0);
-  const diffMs = today.getTime() - due.getTime();
-  if (diffMs <= 0) return 0;
-  return Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  const diff = today.getTime() - due.getTime();
+  if (diff <= 0) return 0;
+
+  return Math.floor(diff / (1000 * 60 * 60 * 24));
 }
 
 async function safeGet<T>(url: string): Promise<T> {
@@ -264,195 +250,126 @@ async function safeGet<T>(url: string): Promise<T> {
   const text = await res.text();
 
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${text.slice(0, 240)}`);
-  if (!ct.includes("application/json")) throw new Error(`Expected JSON. Got ${ct || "unknown"}`);
+  if (!ct.includes("application/json")) {
+    throw new Error(`Expected JSON. Got ${ct || "unknown"}`);
+  }
 
   return JSON.parse(text) as T;
 }
 
-/* =========================
-   Premium Motion
-========================= */
+function deltaPct(current: number, prev: number) {
+  if (prev <= 0 && current > 0) return { delta: "+100.0%", trend: "up" as const };
+  if (prev <= 0 && current <= 0) return { delta: "0.0%", trend: "flat" as const };
 
-function useInViewOnce<T extends HTMLElement>(opts?: IntersectionObserverInit) {
-  const ref = React.useRef<T | null>(null);
-  const [seen, setSeen] = React.useState(false);
-
-  React.useEffect(() => {
-    const el = ref.current;
-    if (!el || seen) return;
-
-    const io = new IntersectionObserver(
-      (entries) => {
-        for (const e of entries) {
-          if (e.isIntersecting) {
-            setSeen(true);
-            io.disconnect();
-            break;
-          }
-        }
-      },
-      { threshold: 0.15, rootMargin: "120px", ...(opts || {}) }
-    );
-
-    io.observe(el);
-    return () => io.disconnect();
-  }, [seen, opts]);
-
-  return { ref, seen } as const;
-}
-
-function FadeInCard({
-  children,
-  className,
-  delayMs = 0,
-}: {
-  children: React.ReactNode;
-  className?: string;
-  delayMs?: number;
-}) {
-  const { ref, seen } = useInViewOnce<HTMLDivElement>();
-  return (
-    <div
-      ref={ref}
-      style={{ transitionDelay: `${delayMs}ms` }}
-      className={cn(
-        "transform-gpu transition-all duration-700 ease-out",
-        seen ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0",
-        className
-      )}
-    >
-      {children}
-    </div>
-  );
+  const pct = ((current - prev) / prev) * 100;
+  return {
+    delta: `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`,
+    trend: pct > 0 ? ("up" as const) : pct < 0 ? ("down" as const) : ("flat" as const),
+  };
 }
 
 /* =========================
-   3D Card
+   UI
 ========================= */
 
-function Card3D({
+function ShellCard({
   children,
   className,
-  glow = "neutral",
 }: {
   children: React.ReactNode;
   className?: string;
-  glow?: "navy" | "orange" | "neutral";
 }) {
-  const glowCls =
-    glow === "orange"
-      ? "before:bg-[radial-gradient(60%_60%_at_20%_12%,rgba(255,138,30,0.18),transparent_60%)]"
-      : glow === "navy"
-      ? "before:bg-[radial-gradient(60%_60%_at_20%_12%,rgba(7,27,56,0.14),transparent_60%)]"
-      : "before:bg-[radial-gradient(60%_60%_at_20%_12%,rgba(15,23,42,0.10),transparent_60%)]";
-
   return (
     <div
       className={cn(
-        "relative rounded-[30px] bg-white",
-        "shadow-[0_1px_0_rgba(15,23,42,0.08),0_18px_45px_rgba(15,23,42,0.10)]",
-        "ring-1 ring-slate-200/80",
-        "transform-gpu transition-all duration-300 ease-out",
-        "hover:-translate-y-0.5 hover:shadow-[0_1px_0_rgba(15,23,42,0.08),0_26px_70px_rgba(15,23,42,0.14)]",
-        "before:pointer-events-none before:absolute before:inset-0 before:rounded-[30px] before:opacity-90",
-        glowCls,
+        "relative overflow-hidden rounded-[26px] border border-slate-200/80 bg-white",
+        "shadow-[0_1px_0_rgba(15,23,42,0.05),0_12px_30px_rgba(15,23,42,0.08)]",
         className
       )}
     >
-      <div className="pointer-events-none absolute inset-0 rounded-[30px] bg-[linear-gradient(180deg,rgba(255,255,255,0.84),transparent_58%)] opacity-55" />
-      <div className="pointer-events-none absolute inset-0 rounded-[30px] ring-1 ring-white/60" />
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.82),transparent_65%)]" />
       <div className="relative">{children}</div>
     </div>
   );
 }
 
-/* =========================
-   KPI
-========================= */
+function accentBadge(accent?: Accent) {
+  if (accent === "orange") return "bg-[#ff8a1e]/10 text-[#c25708] ring-[#ff8a1e]/20";
+  if (accent === "green") return "bg-emerald-500/10 text-emerald-700 ring-emerald-500/20";
+  if (accent === "navy") return "bg-[#071b38]/10 text-[#071b38] ring-[#071b38]/15";
+  return "bg-slate-100 text-slate-700 ring-slate-200";
+}
 
-function TrendPill({ trend, delta }: { trend?: Kpi["trend"]; delta?: string }) {
+function TrendPill({
+  trend,
+  delta,
+}: {
+  trend?: "up" | "down" | "flat";
+  delta?: string;
+}) {
   if (!delta) return null;
 
-  const up = trend === "up";
-  const down = trend === "down";
-
-  const cls = up
-    ? "bg-emerald-500/10 text-emerald-700 ring-1 ring-emerald-500/20"
-    : down
-    ? "bg-rose-500/10 text-rose-700 ring-1 ring-rose-500/20"
-    : "bg-slate-100 text-slate-700 ring-1 ring-slate-200";
+  const cls =
+    trend === "up"
+      ? "bg-emerald-500/10 text-emerald-700 ring-emerald-500/20"
+      : trend === "down"
+      ? "bg-rose-500/10 text-rose-700 ring-rose-500/20"
+      : "bg-slate-100 text-slate-700 ring-slate-200";
 
   return (
-    <span className={cn("inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold", cls)}>
-      {up ? <ArrowUpRight className="size-3.5" /> : down ? <ArrowDownRight className="size-3.5" /> : null}
+    <span className={cn("inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1", cls)}>
+      {trend === "up" ? <ArrowUpRight className="size-3.5" /> : null}
+      {trend === "down" ? <ArrowDownRight className="size-3.5" /> : null}
       {delta}
     </span>
   );
 }
 
-function KpiTile({
-  kpi,
-  icon: Icon,
-  delayMs = 0,
-}: {
-  kpi: Kpi;
-  icon: React.ElementType;
-  delayMs?: number;
-}) {
+function KpiCard({ item }: { item: Kpi }) {
+  const Icon = item.icon;
+
   return (
-    <FadeInCard delayMs={delayMs} className="h-full">
-      <Card3D
-        glow={kpi.accent === "orange" ? "orange" : kpi.accent === "navy" ? "navy" : "neutral"}
-        className="flex h-[208px] flex-col justify-between p-6"
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-[13px] font-bold uppercase tracking-[0.16em] text-slate-500">
-              {kpi.label}
-            </div>
+    <ShellCard className="p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500">
+            {item.label}
           </div>
-
-          <div className={cn("rounded-full px-2.5 py-1 text-xs font-semibold", brandTone(kpi.accent))}>
-            MUR
+          <div className="mt-2 text-lg font-extrabold tracking-tight text-slate-950 sm:text-xl xl:text-[22px]">
+            {item.value}
           </div>
         </div>
 
-        <div className="mt-3 flex items-end justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-[28px] font-extrabold leading-[1.05] tracking-tight text-slate-950 sm:text-[32px]">
-              {kpi.value}
-            </div>
-          </div>
-
-          <div className="grid size-14 shrink-0 place-items-center rounded-[22px] bg-slate-50 ring-1 ring-slate-200">
-            <Icon className="size-5 text-slate-500" />
-          </div>
+        <div
+          className={cn(
+            "grid size-10 shrink-0 place-items-center rounded-2xl ring-1",
+            accentBadge(item.accent)
+          )}
+        >
+          <Icon className="size-4.5" />
         </div>
+      </div>
 
-        <div className="flex items-center justify-between gap-3">
-          <div className="line-clamp-2 text-sm text-slate-600">{kpi.note || "\u00A0"}</div>
-          <TrendPill trend={kpi.trend} delta={kpi.delta} />
-        </div>
-      </Card3D>
-    </FadeInCard>
+      <div className="mt-3 flex items-center justify-between gap-2">
+        <div className="text-xs text-slate-500">Real data</div>
+        <TrendPill trend={item.trend} delta={item.delta} />
+      </div>
+    </ShellCard>
   );
 }
 
-/* =========================
-   Tooltip
-========================= */
-
 function PremiumTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
+
   return (
-    <div className="rounded-2xl bg-white/95 px-3 py-2 shadow-[0_18px_55px_rgba(2,6,23,0.18)] ring-1 ring-slate-200 backdrop-blur-xl">
-      <div className="text-xs font-semibold text-slate-700">{label}</div>
-      <div className="mt-1 space-y-1.5">
+    <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-[0_12px_35px_rgba(2,6,23,0.14)]">
+      <div className="text-[11px] font-semibold text-slate-500">{label}</div>
+      <div className="mt-1 space-y-1">
         {payload.map((p: any) => (
           <div key={p.dataKey} className="flex items-center justify-between gap-6 text-xs">
             <span className="text-slate-600">{p.name}</span>
             <span className="font-semibold text-slate-900">
-              {typeof p.value === "number" ? (p.dataKey === "invoices" ? p.value : money(p.value)) : p.value}
+              {typeof p.value === "number" ? money(p.value) : String(p.value)}
             </span>
           </div>
         ))}
@@ -462,7 +379,7 @@ function PremiumTooltip({ active, payload, label }: any) {
 }
 
 /* =========================
-   Dashboard
+   Page
 ========================= */
 
 export default function DashboardClient() {
@@ -470,7 +387,7 @@ export default function DashboardClient() {
 
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
-  const [lastSync, setLastSync] = React.useState<string>(fmtLastSync(new Date()));
+  const [lastSync, setLastSync] = React.useState(fmtDateTime(new Date()));
 
   const [invoices, setInvoices] = React.useState<InvoiceRow[]>([]);
   const [quotations, setQuotations] = React.useState<QuotationRow[]>([]);
@@ -480,8 +397,8 @@ export default function DashboardClient() {
 
   const [kpis, setKpis] = React.useState<Kpi[]>([]);
   const [series, setSeries] = React.useState<SeriesPoint[]>([]);
-  const [aging, setAging] = React.useState<AgingBucket[]>([]);
   const [statusSlices, setStatusSlices] = React.useState<StatusSlice[]>([]);
+  const [aging, setAging] = React.useState<AgingBucket[]>([]);
   const [dueRows, setDueRows] = React.useState<DueRow[]>([]);
 
   const now = React.useMemo(() => new Date(), []);
@@ -489,11 +406,10 @@ export default function DashboardClient() {
   const previousMonthStart = React.useMemo(() => startOfMonth(addMonths(now, -1)), [now]);
   const previousMonthEnd = React.useMemo(() => endOfMonth(addMonths(now, -1)), [now]);
 
-  // Fixed dashboard period: March 2026 -> February 2027
-  const fixedPeriodStart = React.useMemo(() => new Date(2026, 2, 1), []);
+  const fixedStart = React.useMemo(() => new Date(2026, 2, 1), []);
   const fixedMonths = React.useMemo(
-    () => Array.from({ length: 12 }).map((_, i) => addMonths(fixedPeriodStart, i)),
-    [fixedPeriodStart]
+    () => Array.from({ length: 12 }, (_, i) => addMonths(fixedStart, i)),
+    [fixedStart]
   );
 
   const buildDashboard = React.useCallback(
@@ -514,12 +430,12 @@ export default function DashboardClient() {
         return d ? d >= previousMonthStart && d <= previousMonthEnd : false;
       });
 
-      const thisMonthCredits = crnRows.filter((x) => {
+      const thisMonthCreditNotes = crnRows.filter((x) => {
         const d = safeDate(x.credit_date ?? x.created_at);
         return d ? isSameMonth(d, now) : false;
       });
 
-      const prevMonthCredits = crnRows.filter((x) => {
+      const prevMonthCreditNotes = crnRows.filter((x) => {
         const d = safeDate(x.credit_date ?? x.created_at);
         return d ? d >= previousMonthStart && d <= previousMonthEnd : false;
       });
@@ -527,180 +443,185 @@ export default function DashboardClient() {
       const revenueThisMonth = thisMonthInvoices.reduce((s, x) => s + n2(x.total_amount), 0);
       const revenuePrevMonth = prevMonthInvoices.reduce((s, x) => s + n2(x.total_amount), 0);
 
-      const outstanding = invRows.reduce((s, x) => s + n2(x.balance_amount), 0);
-      const outstandingPrevMonth = prevMonthInvoices.reduce((s, x) => s + n2(x.balance_amount), 0);
+      const outstandingNow = invRows.reduce((s, x) => s + n2(x.balance_amount), 0);
+      const outstandingPrev = prevMonthInvoices.reduce((s, x) => s + n2(x.balance_amount), 0);
 
-      const adjustmentsThisMonth = thisMonthCredits.reduce((s, x) => s + n2(x.total_amount), 0);
-      const adjustmentsPrevMonth = prevMonthCredits.reduce((s, x) => s + n2(x.total_amount), 0);
+      const collectionsThisMonth = thisMonthInvoices.reduce((s, x) => s + n2(x.paid_amount), 0);
+      const collectionsPrevMonth = prevMonthInvoices.reduce((s, x) => s + n2(x.paid_amount), 0);
 
-      const overdueValue = invRows
-        .filter((x) => isOverdueRow(x))
-        .reduce((s, x) => s + n2(x.balance_amount), 0);
+      const creditThisMonth = thisMonthCreditNotes.reduce((s, x) => s + n2(x.total_amount), 0);
+      const creditPrevMonth = prevMonthCreditNotes.reduce((s, x) => s + n2(x.total_amount), 0);
 
-      const overdueValuePrevMonth = prevMonthInvoices
-        .filter((x) => isOverdueRow(x))
-        .reduce((s, x) => s + n2(x.balance_amount), 0);
-
-      const quotationPipeline = quoRows.reduce((s, x) => s + n2(x.total_amount), 0);
-      const quotationsThisMonth = quoRows.filter((x) => {
-        const d = safeDate(x.quote_date ?? x.created_at);
-        return d ? isSameMonth(d, now) : false;
-      }).length;
-
-      const vatThisMonth = thisMonthInvoices.reduce((s, x) => s + n2(x.vat_amount), 0);
-      const receivedThisMonth = thisMonthInvoices.reduce((s, x) => s + n2(x.paid_amount), 0);
-
-      function pctDelta(current: number, prev: number) {
-        if (prev <= 0 && current > 0) return { delta: "+100.0%", trend: "up" as const };
-        if (prev <= 0 && current <= 0) return { delta: "0.0%", trend: "flat" as const };
-        const pct = ((current - prev) / prev) * 100;
-        return {
-          delta: `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`,
-          trend: pct > 0 ? ("up" as const) : pct < 0 ? ("down" as const) : ("flat" as const),
-        };
-      }
-
-      const revenueDelta = pctDelta(revenueThisMonth, revenuePrevMonth);
-      const outstandingDelta = pctDelta(outstanding, outstandingPrevMonth);
-      const adjustmentsDelta = pctDelta(adjustmentsThisMonth, adjustmentsPrevMonth);
-      const overdueDelta = pctDelta(overdueValue, overdueValuePrevMonth);
+      const revenueDelta = deltaPct(revenueThisMonth, revenuePrevMonth);
+      const outstandingDelta = deltaPct(outstandingNow, outstandingPrev);
+      const collectionsDelta = deltaPct(collectionsThisMonth, collectionsPrevMonth);
+      const creditDelta = deltaPct(creditThisMonth, creditPrevMonth);
 
       setKpis([
         {
-          label: "Revenue This Month",
+          label: "Revenue",
           value: money(revenueThisMonth),
-          note: `${thisMonthInvoices.length} invoice(s) issued this month.`,
-          accent: "navy",
           delta: revenueDelta.delta,
           trend: revenueDelta.trend,
+          accent: "navy",
+          icon: TrendingUp,
         },
         {
-          label: "Outstanding Receivables",
-          value: money(outstanding),
-          note: "Open balances across unpaid and partial invoices.",
-          accent: "orange",
+          label: "Outstanding",
+          value: money(outstandingNow),
           delta: outstandingDelta.delta,
           trend: outstandingDelta.trend,
-        },
-        {
-          label: "Credit Notes / Adjustments",
-          value: money(adjustmentsThisMonth),
-          note: `${thisMonthCredits.length} credit note(s) this month.`,
-          accent: "muted",
-          delta: adjustmentsDelta.delta,
-          trend: adjustmentsDelta.trend,
-        },
-        {
-          label: "Overdue Exposure",
-          value: money(overdueValue),
-          note: `${invRows.filter((x) => isOverdueRow(x)).length} overdue invoice(s).`,
           accent: "orange",
-          delta: overdueDelta.delta,
-          trend: overdueDelta.trend,
+          icon: AlertTriangle,
+        },
+        {
+          label: "Collections",
+          value: money(collectionsThisMonth),
+          delta: collectionsDelta.delta,
+          trend: collectionsDelta.trend,
+          accent: "green",
+          icon: Landmark,
+        },
+        {
+          label: "Credit Notes",
+          value: money(creditThisMonth),
+          delta: creditDelta.delta,
+          trend: creditDelta.trend,
+          accent: "slate",
+          icon: Receipt,
         },
       ]);
 
-      const seriesMap = new Map<string, MonthlyAccumulator>();
+      const seriesMap = new Map<
+        string,
+        { revenue: number; collections: number; credits: number; dues: number }
+      >();
+
       for (const m of fixedMonths) {
-        seriesMap.set(monthKey(m), { sales: 0, expenses: 0, invoices: 0, cash: 0 });
+        seriesMap.set(monthKey(m), {
+          revenue: 0,
+          collections: 0,
+          credits: 0,
+          dues: 0,
+        });
       }
 
       for (const inv of invRows) {
         const d = safeDate(inv.invoice_date ?? inv.created_at);
         if (!d) continue;
+
         const key = monthKey(startOfMonth(d));
-        const row = seriesMap.get(key);
-        if (!row) continue;
-        row.sales += n2(inv.total_amount);
-        row.cash += n2(inv.paid_amount);
-        row.invoices += 1;
+        const slot = seriesMap.get(key);
+        if (!slot) continue;
+
+        slot.revenue += n2(inv.total_amount);
+        slot.collections += n2(inv.paid_amount);
+        slot.dues += n2(inv.balance_amount);
       }
 
       for (const crn of crnRows) {
         const d = safeDate(crn.credit_date ?? crn.created_at);
         if (!d) continue;
+
         const key = monthKey(startOfMonth(d));
-        const row = seriesMap.get(key);
-        if (!row) continue;
-        row.expenses += n2(crn.total_amount);
+        const slot = seriesMap.get(key);
+        if (!slot) continue;
+
+        slot.credits += n2(crn.total_amount);
       }
 
       setSeries(
         fixedMonths.map((m) => {
-          const row = seriesMap.get(monthKey(m)) ?? { sales: 0, expenses: 0, invoices: 0, cash: 0 };
+          const slot = seriesMap.get(monthKey(m)) ?? {
+            revenue: 0,
+            collections: 0,
+            credits: 0,
+            dues: 0,
+          };
+
           return {
-            name: monthLabel(m),
-            sales: row.sales,
-            expenses: row.expenses,
-            invoices: row.invoices,
-            cash: row.cash,
+            label: monthLabel(m),
+            revenue: slot.revenue,
+            collections: slot.collections,
+            credits: slot.credits,
+            dues: slot.dues,
           };
         })
       );
 
+      const paidCount = invRows.filter((x) => String(x.status ?? "").toUpperCase() === "PAID").length;
+      const issuedCount = invRows.filter((x) => String(x.status ?? "").toUpperCase() === "ISSUED").length;
+      const partialCount = invRows.filter((x) => String(x.status ?? "").toUpperCase() === "PARTIALLY_PAID").length;
+      const overdueCount = invRows.filter((x) => isOverdue(x)).length;
+
+      setStatusSlices([
+        { name: "Issued", value: issuedCount },
+        { name: "Paid", value: paidCount },
+        { name: "Partial", value: partialCount },
+        { name: "Overdue", value: overdueCount },
+      ]);
+
       const agingBuckets: AgingBucket[] = [
-        { name: "0–15 days", value: 0 },
-        { name: "16–30 days", value: 0 },
-        { name: "31–60 days", value: 0 },
-        { name: "61–90 days", value: 0 },
-        { name: "90+ days", value: 0 },
+        { name: "0–15", value: 0 },
+        { name: "16–30", value: 0 },
+        { name: "31–60", value: 0 },
+        { name: "61–90", value: 0 },
+        { name: "90+", value: 0 },
       ];
 
       for (const inv of invRows) {
         const bal = n2(inv.balance_amount);
         if (bal <= 0) continue;
-        const days = daysPastDue(inv);
+        const d = daysPastDue(inv);
 
-        if (days <= 15) agingBuckets[0].value += bal;
-        else if (days <= 30) agingBuckets[1].value += bal;
-        else if (days <= 60) agingBuckets[2].value += bal;
-        else if (days <= 90) agingBuckets[3].value += bal;
+        if (d <= 15) agingBuckets[0].value += bal;
+        else if (d <= 30) agingBuckets[1].value += bal;
+        else if (d <= 60) agingBuckets[2].value += bal;
+        else if (d <= 90) agingBuckets[3].value += bal;
         else agingBuckets[4].value += bal;
       }
 
       setAging(agingBuckets);
 
-      const paidCount = invRows.filter((x) => String(x.status ?? "").toUpperCase() === "PAID").length;
-      const issuedCount = invRows.filter((x) => String(x.status ?? "").toUpperCase() === "ISSUED").length;
-      const partialCount = invRows.filter((x) => String(x.status ?? "").toUpperCase() === "PARTIALLY_PAID").length;
-      const overdueCount = invRows.filter((x) => isOverdueRow(x)).length;
-
-      setStatusSlices([
-        { name: "Issued", value: issuedCount },
-        { name: "Overdue", value: overdueCount },
-        { name: "Paid", value: paidCount },
-        { name: "Partial", value: partialCount },
-      ]);
-
-      const dueMap = new Map<string, CustomerDueAccumulator>();
+      const dueMap = new Map<
+        string,
+        {
+          customer: string;
+          totalDue: number;
+          overdue30: number;
+          overdue60: number;
+          overdue90: number;
+          lastInvoice: string;
+          lastTs: number;
+        }
+      >();
 
       for (const inv of invRows) {
         const bal = n2(inv.balance_amount);
         if (bal <= 0) continue;
 
         const customer = inv.customer_name?.trim() || "Unknown Customer";
-        const days = daysPastDue(inv);
+        const d = daysPastDue(inv);
         const invDate = safeDate(inv.invoice_date ?? inv.created_at);
-        const invTs = invDate ? invDate.getTime() : 0;
+        const ts = invDate ? invDate.getTime() : 0;
 
-        const current =
-          dueMap.get(customer) ?? {
-            customer,
-            totalDue: 0,
-            overdue30: 0,
-            overdue60: 0,
-            overdue90: 0,
-            lastInvoice: "—",
-            lastInvoiceDateTs: 0,
-          };
+        const current = dueMap.get(customer) ?? {
+          customer,
+          totalDue: 0,
+          overdue30: 0,
+          overdue60: 0,
+          overdue90: 0,
+          lastInvoice: "—",
+          lastTs: 0,
+        };
 
         current.totalDue += bal;
-        if (days >= 30) current.overdue30 += bal;
-        if (days >= 60) current.overdue60 += bal;
-        if (days >= 90) current.overdue90 += bal;
+        if (d >= 30) current.overdue30 += bal;
+        if (d >= 60) current.overdue60 += bal;
+        if (d >= 90) current.overdue90 += bal;
 
-        if (invTs >= current.lastInvoiceDateTs) {
-          current.lastInvoiceDateTs = invTs;
+        if (ts >= current.lastTs) {
+          current.lastTs = ts;
           current.lastInvoice = inv.invoice_no || "—";
         }
 
@@ -709,17 +630,14 @@ export default function DashboardClient() {
 
       const sortedDue = Array.from(dueMap.values())
         .sort((a, b) => b.totalDue - a.totalDue)
-        .slice(0, 8)
-        .map(({ lastInvoiceDateTs, ...rest }) => rest);
+        .slice(0, 6)
+        .map(({ lastTs, ...rest }) => rest);
 
       setDueRows(sortedDue);
 
+      void quoRows;
       void customerRows;
       void supplierRows;
-      void quotationPipeline;
-      void quotationsThisMonth;
-      void vatThisMonth;
-      void receivedThisMonth;
     },
     [fixedMonths, now, previousMonthEnd, previousMonthStart]
   );
@@ -727,6 +645,7 @@ export default function DashboardClient() {
   const load = React.useCallback(async () => {
     setLoading(true);
     setError("");
+
     try {
       const [inv, quo, crn, cus, sup] = await Promise.all([
         safeGet<ApiListResponse<InvoiceRow>>("/api/invoices?page=1&pageSize=500"),
@@ -749,9 +668,9 @@ export default function DashboardClient() {
       setSuppliers(supplierRows);
 
       buildDashboard(invRows, quoRows, crnRows, customerRows, supplierRows);
-      setLastSync(fmtLastSync(new Date()));
+      setLastSync(fmtDateTime(new Date()));
     } catch (e: any) {
-      setError(e?.message || "Failed to refresh");
+      setError(e?.message || "Failed to refresh dashboard");
       setInvoices([]);
       setQuotations([]);
       setCreditNotes([]);
@@ -759,8 +678,8 @@ export default function DashboardClient() {
       setSuppliers([]);
       setKpis([]);
       setSeries([]);
-      setAging([]);
       setStatusSlices([]);
+      setAging([]);
       setDueRows([]);
     } finally {
       setLoading(false);
@@ -770,10 +689,6 @@ export default function DashboardClient() {
   React.useEffect(() => {
     void load();
   }, [load]);
-
-  const totalAging = React.useMemo(() => aging.reduce((a, b) => a + b.value, 0), [aging]);
-
-  const pieColors = ["#ff8a1e", "#0ea5e9", "#071b38", "#64748b", "#22c55e"];
 
   const revenueThisMonth = React.useMemo(() => {
     return invoices
@@ -789,24 +704,14 @@ export default function DashboardClient() {
     [quotations]
   );
 
-  const creditNoteValue = React.useMemo(
-    () => creditNotes.reduce((s, x) => s + n2(x.total_amount), 0),
-    [creditNotes]
-  );
-
   const collections = React.useMemo(
     () => invoices.reduce((s, x) => s + n2(x.paid_amount), 0),
     [invoices]
   );
 
-  const issuedCount = React.useMemo(
-    () => invoices.filter((x) => String(x.status ?? "").toUpperCase() === "ISSUED").length,
-    [invoices]
-  );
-
-  const overdueCount = React.useMemo(
-    () => invoices.filter((x) => isOverdueRow(x)).length,
-    [invoices]
+  const creditNoteValue = React.useMemo(
+    () => creditNotes.reduce((s, x) => s + n2(x.total_amount), 0),
+    [creditNotes]
   );
 
   const outstanding = React.useMemo(
@@ -814,548 +719,599 @@ export default function DashboardClient() {
     [invoices]
   );
 
+  const totalAging = React.useMemo(() => aging.reduce((s, x) => s + x.value, 0), [aging]);
+
+  const pieColors = ["#071b38", "#ff8a1e", "#0f766e", "#64748b", "#22c55e"];
+
   return (
-    <>
-      <style jsx global>{`
-        @keyframes floatIn {
-          0% {
-            opacity: 0;
-            transform: translateY(10px) scale(0.985);
-          }
-          100% {
-            opacity: 1;
-            transform: translateY(0) scale(1);
-          }
-        }
-      `}</style>
+    <div className="space-y-3 pb-1">
+      <ShellCard className="overflow-hidden">
+        <div className="absolute inset-0 bg-[linear-gradient(135deg,#071b38_0%,#0d2c59_48%,#163d73_100%)]" />
+        <div className="absolute inset-0 opacity-70 bg-[radial-gradient(900px_320px_at_-10%_-20%,rgba(255,255,255,0.12),transparent_55%),radial-gradient(700px_260px_at_110%_0%,rgba(255,138,30,0.18),transparent_55%)]" />
 
-      <div className="space-y-5">
-        {/* Header */}
-        <FadeInCard>
-          <div className="relative overflow-hidden rounded-[34px] border border-slate-200/80 bg-white px-5 py-5 shadow-[0_1px_0_rgba(15,23,42,0.08),0_22px_50px_rgba(15,23,42,0.10)] sm:px-7 sm:py-6">
-            <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,#071b38_0%,#0d2c59_48%,#163d73_100%)] opacity-[0.04]" />
-            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(800px_280px_at_-10%_-10%,rgba(255,138,30,0.12),transparent_55%),radial-gradient(700px_260px_at_110%_0%,rgba(7,27,56,0.10),transparent_50%)]" />
-
-            <div className="relative flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="inline-flex items-center gap-2 rounded-full bg-[#071b38] px-3 py-1.5 text-xs font-semibold text-white shadow-sm">
-                    <Building2 className="size-3.5" />
-                    KS Contracting
-                  </span>
-                  <span className="inline-flex items-center gap-2 rounded-full bg-[#ff8a1e]/12 px-3 py-1.5 text-xs font-semibold text-[#c25708] ring-1 ring-[#ff8a1e]/20">
-                    <ShieldCheck className="size-3.5" />
-                    Executive Finance Dashboard
-                  </span>
-                  <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
-                    <TrendingUp className="size-3.5" />
-                    March 2026 → February 2027
-                  </span>
-                </div>
-
-                <div className="mt-3 text-[26px] font-extrabold tracking-tight text-slate-950 sm:text-[34px]">
-                  Dashboard
-                </div>
-                <div className="mt-1 max-w-4xl text-sm text-slate-600 sm:text-[15px]">
-                  Premium live financial control center for invoices, receivables, quotations,
-                  cash collections, operational exposure, and monthly performance visibility.
-                </div>
+        <div className="relative p-4 sm:p-5">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-2 rounded-full bg-white/12 px-3 py-1.5 text-[11px] font-semibold text-white ring-1 ring-white/15">
+                  <Building2 className="size-3.5" />
+                  KS Contracting
+                </span>
+                <span className="inline-flex items-center gap-2 rounded-full bg-white/12 px-3 py-1.5 text-[11px] font-semibold text-white ring-1 ring-white/15">
+                  <ShieldCheck className="size-3.5" />
+                  Executive Dashboard
+                </span>
               </div>
 
-              <div className="flex flex-col gap-2 sm:items-end">
-                <div className="inline-flex items-center justify-end gap-2">
-                  <span className="rounded-full bg-white px-4 py-2 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 shadow-sm">
-                    {lastSync}
-                  </span>
-                  <Button
-                    onClick={() => void load()}
-                    className="h-12 rounded-2xl bg-[#ff8a1e] px-5 text-white shadow-[0_18px_44px_rgba(255,138,30,0.22)] hover:bg-[#f07c0f]"
-                    disabled={loading}
-                  >
-                    <RefreshCw className={cn("mr-2 size-4", loading && "animate-spin")} />
-                    Refresh
-                  </Button>
-                </div>
+              <h1 className="mt-3 text-2xl font-extrabold tracking-tight text-white sm:text-3xl">
+                Dashboard
+              </h1>
+              <p className="mt-1 text-sm text-blue-50/85">Real-time finance overview</p>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="rounded-2xl bg-white/10 px-3 py-2 text-xs font-semibold text-white ring-1 ring-white/15">
+                {lastSync}
               </div>
+              <Button
+                onClick={() => void load()}
+                disabled={loading}
+                className="h-11 rounded-2xl bg-[#ff8a1e] px-4 text-white hover:bg-[#f07c0f]"
+              >
+                <RefreshCw className={cn("mr-2 size-4", loading && "animate-spin")} />
+                Refresh
+              </Button>
             </div>
           </div>
-        </FadeInCard>
-
-        {error ? (
-          <FadeInCard>
-            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-              {error}
-            </div>
-          </FadeInCard>
-        ) : null}
-
-        {/* KPI tiles */}
-        <div className="grid grid-cols-1 items-stretch gap-4 md:grid-cols-2 2xl:grid-cols-4">
-          {kpis.map((k, i) => {
-            const icons = [Wallet, CreditCard, FileText, Clock];
-            const Icon = icons[i % icons.length];
-            return (
-              <div key={k.label} className="h-full">
-                <KpiTile kpi={k} icon={Icon} delayMs={i * 55} />
-              </div>
-            );
-          })}
         </div>
+      </ShellCard>
 
-        {/* Charts row */}
-        <div className="grid grid-cols-1 items-stretch gap-4 2xl:grid-cols-3">
-          <FadeInCard delayMs={60} className="h-full 2xl:col-span-2">
-            <Card3D glow="navy" className="h-full p-6">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <div className="text-base font-bold tracking-tight text-slate-950">
-                    Revenue, Adjustments & Cash
-                  </div>
-                  <div className="mt-1 text-sm text-slate-600">
-                    Fixed annual executive view from <span className="font-semibold">Mar 2026</span> to{" "}
-                    <span className="font-semibold">Feb 2027</span>.
-                  </div>
+      {error ? (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {error}
+        </div>
+      ) : null}
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {kpis.map((item) => (
+          <KpiCard key={item.label} item={item} />
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1.75fr_0.95fr]">
+        <ShellCard className="p-4 sm:p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-extrabold tracking-tight text-slate-950">
+                Revenue / Collections / Credits
+              </div>
+              <div className="mt-0.5 text-xs text-slate-500">Mar 2026 → Feb 2027</div>
+            </div>
+
+            <div className="rounded-full bg-slate-50 px-3 py-1.5 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-200">
+              Rs MUR
+            </div>
+          </div>
+
+          <div className="mt-3 h-[210px] sm:h-[230px] lg:h-[245px] xl:h-[230px] 2xl:h-[250px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={series} margin={{ top: 10, right: 8, left: -18, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="dashboardRevenue" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#071b38" stopOpacity={0.22} />
+                    <stop offset="100%" stopColor="#071b38" stopOpacity={0.02} />
+                  </linearGradient>
+                  <linearGradient id="dashboardCollections" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#ff8a1e" stopOpacity={0.18} />
+                    <stop offset="100%" stopColor="#ff8a1e" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+
+                <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#e2e8f0" />
+                <XAxis
+                  dataKey="label"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fill: "#64748b", fontSize: 11, fontWeight: 600 }}
+                />
+                <YAxis
+                  axisLine={false}
+                  tickLine={false}
+                  width={64}
+                  tick={{ fill: "#64748b", fontSize: 11, fontWeight: 600 }}
+                  tickFormatter={(v) => moneyShort(Number(v))}
+                />
+                <Tooltip content={<PremiumTooltip />} />
+
+                <Area
+                  type="monotone"
+                  dataKey="revenue"
+                  name="Revenue"
+                  stroke="#071b38"
+                  strokeWidth={3}
+                  fill="url(#dashboardRevenue)"
+                  dot={false}
+                  activeDot={{ r: 4 }}
+                  isAnimationActive={false}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="collections"
+                  name="Collections"
+                  stroke="#ff8a1e"
+                  strokeWidth={3}
+                  fill="url(#dashboardCollections)"
+                  dot={false}
+                  activeDot={{ r: 4 }}
+                  isAnimationActive={false}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="credits"
+                  name="Credits"
+                  stroke="#64748b"
+                  strokeWidth={2.5}
+                  fill="transparent"
+                  dot={false}
+                  activeDot={{ r: 4 }}
+                  isAnimationActive={false}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-[0.9fr_1.1fr]">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-2xl bg-slate-50 px-3 py-3 ring-1 ring-slate-200">
+                <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                  Revenue
                 </div>
-                <div className="rounded-full bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
-                  Currency: MUR
+                <div className="mt-1 text-sm font-extrabold text-slate-950">
+                  {money(revenueThisMonth)}
                 </div>
               </div>
 
-              <div className="mt-4 h-[370px] rounded-[24px] bg-[linear-gradient(180deg,#fbfdff_0%,#f8fafc_100%)] p-3 ring-1 ring-slate-200">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={series} margin={{ top: 18, right: 24, left: 8, bottom: 8 }}>
-                    <defs>
-                      <linearGradient id="revFillDashboard" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#071b38" stopOpacity={0.28} />
-                        <stop offset="100%" stopColor="#071b38" stopOpacity={0.02} />
-                      </linearGradient>
-                      <linearGradient id="cashFillDashboard" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#ff8a1e" stopOpacity={0.24} />
-                        <stop offset="100%" stopColor="#ff8a1e" stopOpacity={0.03} />
-                      </linearGradient>
-                    </defs>
+              <div className="rounded-2xl bg-slate-50 px-3 py-3 ring-1 ring-slate-200">
+                <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                  Pipeline
+                </div>
+                <div className="mt-1 text-sm font-extrabold text-slate-950">
+                  {money(quotationPipeline)}
+                </div>
+              </div>
 
-                    <CartesianGrid strokeDasharray="4 4" stroke="#cbd5e1" vertical={false} />
+              <div className="rounded-2xl bg-emerald-50 px-3 py-3 ring-1 ring-emerald-200">
+                <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-700">
+                  Payment Effected
+                </div>
+                <div className="mt-1 text-sm font-extrabold text-emerald-900">
+                  {money(collections)}
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-rose-50 px-3 py-3 ring-1 ring-rose-200">
+                <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-rose-700">
+                  Dues
+                </div>
+                <div className="mt-1 text-sm font-extrabold text-rose-900">
+                  {money(outstanding)}
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-[24px] border border-slate-200 bg-[linear-gradient(180deg,#fbfdff_0%,#f8fafc_100%)] p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div>
+                  <div className="text-xs font-extrabold tracking-tight text-slate-950">
+                    Payment Effected vs Dues
+                  </div>
+                  <div className="text-[11px] text-slate-500">Mar 2026 → Feb 2027</div>
+                </div>
+
+                <div className="flex items-center gap-3 text-[11px] font-semibold">
+                  <span className="inline-flex items-center gap-1.5 text-emerald-700">
+                    <span className="inline-block size-2.5 rounded-full bg-emerald-500" />
+                    Payment
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 text-rose-700">
+                    <span className="inline-block size-2.5 rounded-full bg-rose-500" />
+                    Dues
+                  </span>
+                </div>
+              </div>
+
+              <div className="h-[190px] sm:h-[210px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={series}
+                    margin={{ top: 8, right: 6, left: -16, bottom: 0 }}
+                    barCategoryGap={14}
+                  >
+                    <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#e2e8f0" />
                     <XAxis
-                      dataKey="name"
-                      tickLine={false}
+                      dataKey="label"
                       axisLine={false}
-                      tick={{ fill: "#475569", fontSize: 12, fontWeight: 600 }}
+                      tickLine={false}
+                      tick={{ fill: "#64748b", fontSize: 11, fontWeight: 600 }}
                     />
                     <YAxis
-                      tickLine={false}
                       axisLine={false}
-                      tick={{ fill: "#475569", fontSize: 12, fontWeight: 600 }}
-                      tickFormatter={(v) => compactMoney(Number(v))}
-                      width={88}
+                      tickLine={false}
+                      width={62}
+                      tick={{ fill: "#64748b", fontSize: 11, fontWeight: 600 }}
+                      tickFormatter={(v) => moneyShort(Number(v))}
                     />
                     <Tooltip content={<PremiumTooltip />} />
-
-                    <Area
-                      type="monotone"
-                      dataKey="sales"
-                      name="Revenue"
-                      stroke="#071b38"
-                      strokeWidth={4}
-                      fill="url(#revFillDashboard)"
-                      dot={{ r: 3, strokeWidth: 0, fill: "#071b38" }}
-                      activeDot={{ r: 6, fill: "#071b38" }}
-                      isAnimationActive
-                      animationDuration={850}
+                    <Bar
+                      dataKey="collections"
+                      name="Payment Effected"
+                      fill="#22c55e"
+                      radius={[10, 10, 0, 0]}
+                      maxBarSize={18}
+                      isAnimationActive={false}
                     />
-
-                    <Line
-                      type="monotone"
-                      dataKey="expenses"
-                      name="Adjustments"
-                      stroke="#64748b"
-                      strokeWidth={3}
-                      dot={{ r: 2.5, strokeWidth: 0, fill: "#64748b" }}
-                      activeDot={{ r: 5, fill: "#64748b" }}
-                      isAnimationActive
-                      animationDuration={850}
+                    <Bar
+                      dataKey="dues"
+                      name="Dues"
+                      fill="#ef4444"
+                      radius={[10, 10, 0, 0]}
+                      maxBarSize={18}
+                      isAnimationActive={false}
                     />
-
-                    <Area
-                      type="monotone"
-                      dataKey="cash"
-                      name="Cash Received"
-                      stroke="#ff8a1e"
-                      strokeWidth={3.5}
-                      fill="url(#cashFillDashboard)"
-                      dot={{ r: 3, strokeWidth: 0, fill: "#ff8a1e" }}
-                      activeDot={{ r: 6, fill: "#ff8a1e" }}
-                      isAnimationActive
-                      animationDuration={850}
-                    />
-                  </AreaChart>
+                  </BarChart>
                 </ResponsiveContainer>
               </div>
+            </div>
+          </div>
+        </ShellCard>
 
-              <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
-                <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                  <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Avg. Revenue</div>
-                  <div className="mt-2 text-base font-extrabold text-slate-950">
-                    {money(series.reduce((a, b) => a + b.sales, 0) / Math.max(1, series.length))}
-                  </div>
-                </div>
-                <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                  <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Avg. Adjustments</div>
-                  <div className="mt-2 text-base font-extrabold text-slate-950">
-                    {money(series.reduce((a, b) => a + b.expenses, 0) / Math.max(1, series.length))}
-                  </div>
-                </div>
-                <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                  <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Invoices / Month</div>
-                  <div className="mt-2 text-base font-extrabold text-slate-950">
-                    {Math.round(series.reduce((a, b) => a + b.invoices, 0) / Math.max(1, series.length))}
-                  </div>
-                </div>
-                <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                  <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Cash / Month</div>
-                  <div className="mt-2 text-base font-extrabold text-slate-950">
-                    {money(series.reduce((a, b) => a + b.cash, 0) / Math.max(1, series.length))}
-                  </div>
-                </div>
+        <div className="grid gap-3">
+          <ShellCard className="p-4 sm:p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-extrabold tracking-tight text-slate-950">Invoice Status</div>
+              <div className="rounded-full bg-slate-50 px-3 py-1 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-200">
+                Live
               </div>
-            </Card3D>
-          </FadeInCard>
+            </div>
 
-          <div className="grid h-full gap-4">
-            <FadeInCard delayMs={90} className="h-full">
-              <Card3D glow="orange" className="p-6">
-                <div className="text-base font-bold tracking-tight text-slate-950">Invoice Status</div>
-                <div className="mt-1 text-sm text-slate-600">Live operational mix from real invoice records.</div>
+            <div className="mt-3 h-[200px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Tooltip content={<PremiumTooltip />} />
+                  <Pie
+                    data={statusSlices}
+                    dataKey="value"
+                    nameKey="name"
+                    innerRadius={48}
+                    outerRadius={76}
+                    paddingAngle={3}
+                    stroke="rgba(255,255,255,0.95)"
+                    strokeWidth={2}
+                    isAnimationActive={false}
+                  >
+                    {statusSlices.map((_, i) => (
+                      <Cell key={i} fill={pieColors[i % pieColors.length]} />
+                    ))}
+                  </Pie>
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
 
-                <div className="mt-4 h-[250px] rounded-[24px] bg-[linear-gradient(180deg,#fbfdff_0%,#f8fafc_100%)] p-3 ring-1 ring-slate-200">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Tooltip content={<PremiumTooltip />} />
-                      <Legend verticalAlign="bottom" height={24} iconType="circle" />
-                      <Pie
-                        data={statusSlices}
-                        dataKey="value"
-                        nameKey="name"
-                        innerRadius={68}
-                        outerRadius={102}
-                        paddingAngle={3}
-                        stroke="rgba(255,255,255,0.9)"
-                        strokeWidth={2}
-                        isAnimationActive
-                        animationDuration={850}
-                      >
-                        {statusSlices.map((_, i) => (
-                          <Cell key={i} fill={pieColors[i % pieColors.length]} />
-                        ))}
-                      </Pie>
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                    <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Overdue Count</div>
-                    <div className="mt-2 text-xl font-extrabold text-slate-950">{overdueCount}</div>
+            <div className="grid grid-cols-2 gap-2">
+              {statusSlices.map((s, i) => (
+                <div
+                  key={s.name}
+                  className="flex items-center justify-between rounded-2xl bg-slate-50 px-3 py-2 ring-1 ring-slate-200"
+                >
+                  <div className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+                    <span
+                      className="inline-block size-2.5 rounded-full"
+                      style={{ backgroundColor: pieColors[i % pieColors.length] }}
+                    />
+                    {s.name}
                   </div>
-                  <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                    <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Issued Count</div>
-                    <div className="mt-2 text-xl font-extrabold text-slate-950">{issuedCount}</div>
+                  <span className="text-sm font-extrabold text-slate-950">{s.value}</span>
+                </div>
+              ))}
+            </div>
+          </ShellCard>
+
+          <ShellCard className="p-4 sm:p-5">
+            <div className="text-sm font-extrabold tracking-tight text-slate-950">Quick Actions</div>
+
+            <div className="mt-3 grid gap-2">
+              <Button
+                className="h-11 justify-between rounded-2xl bg-[#071b38] text-white hover:bg-[#06142b]"
+                onClick={() => router.push("/sales/invoices/new")}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <FileText className="size-4" />
+                  New Invoice
+                </span>
+                <ChevronRight className="size-4" />
+              </Button>
+
+              <Button
+                variant="outline"
+                className="h-11 justify-between rounded-2xl"
+                onClick={() => router.push("/payments/new")}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <Wallet className="size-4" />
+                  Payment Effected
+                </span>
+                <ChevronRight className="size-4" />
+              </Button>
+
+              <Button
+                variant="outline"
+                className="h-11 justify-between rounded-2xl"
+                onClick={() => router.push("/payments")}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <CreditCard className="size-4" />
+                  Payments Report
+                </span>
+                <ChevronRight className="size-4" />
+              </Button>
+
+              <Button
+                variant="outline"
+                className="h-11 justify-between rounded-2xl"
+                onClick={() => router.push("/reports/vat")}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <BadgePercent className="size-4" />
+                  VAT Report
+                </span>
+                <ChevronRight className="size-4" />
+              </Button>
+
+              <Button
+                variant="outline"
+                className="h-11 justify-between rounded-2xl"
+                onClick={() => router.push("/reports/soa")}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <Clock className="size-4" />
+                  Overdue List
+                </span>
+                <ChevronRight className="size-4" />
+              </Button>
+
+              <Button
+                variant="outline"
+                className="h-11 justify-between rounded-2xl"
+                onClick={() => router.push("/contacts")}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <Users className="size-4" />
+                  Customers
+                </span>
+                <ChevronRight className="size-4" />
+              </Button>
+            </div>
+
+            <div className="mt-3 rounded-2xl bg-[#ff8a1e]/10 p-3 ring-1 ring-[#ff8a1e]/20">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#c25708]">
+                  Insight
+                </div>
+                <Sparkles className="size-4 text-[#c25708]" />
+              </div>
+              <div className="mt-1 text-sm font-semibold text-[#8a3f06]">
+                {money(revenueThisMonth)} this month
+              </div>
+            </div>
+          </ShellCard>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1.15fr_0.85fr]">
+        <ShellCard className="p-4 sm:p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-sm font-extrabold tracking-tight text-slate-950">Receivables Aging</div>
+            <div className="rounded-full bg-slate-50 px-3 py-1 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-200">
+              {money(totalAging)}
+            </div>
+          </div>
+
+          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-[220px_1fr]">
+            <div className="h-[220px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Tooltip content={<PremiumTooltip />} />
+                  <Pie
+                    data={aging}
+                    dataKey="value"
+                    nameKey="name"
+                    innerRadius={42}
+                    outerRadius={72}
+                    paddingAngle={3}
+                    stroke="rgba(255,255,255,0.95)"
+                    strokeWidth={2}
+                    isAnimationActive={false}
+                  >
+                    {aging.map((_, i) => (
+                      <Cell key={i} fill={pieColors[i % pieColors.length]} />
+                    ))}
+                  </Pie>
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="grid gap-2">
+              {aging.map((b, i) => {
+                const pct = totalAging ? (b.value / totalAging) * 100 : 0;
+                return (
+                  <div key={b.name} className="rounded-2xl bg-slate-50 px-3 py-3 ring-1 ring-slate-200">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm font-semibold text-slate-800">{b.name} days</div>
+                      <div className="text-sm font-extrabold text-slate-950">{money(b.value)}</div>
+                    </div>
+                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${clamp(pct, 0, 100)}%`,
+                          backgroundColor: pieColors[i % pieColors.length],
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </ShellCard>
+
+        <ShellCard className="p-4 sm:p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-sm font-extrabold tracking-tight text-slate-950">Business Snapshot</div>
+            <div className="rounded-full bg-slate-50 px-3 py-1 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-200">
+              Live
+            </div>
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <div className="rounded-2xl bg-slate-50 px-3 py-3 ring-1 ring-slate-200">
+              <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Customers</div>
+              <div className="mt-1 text-lg font-extrabold text-slate-950">{customers.length}</div>
+            </div>
+            <div className="rounded-2xl bg-slate-50 px-3 py-3 ring-1 ring-slate-200">
+              <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Suppliers</div>
+              <div className="mt-1 text-lg font-extrabold text-slate-950">{suppliers.length}</div>
+            </div>
+            <div className="rounded-2xl bg-slate-50 px-3 py-3 ring-1 ring-slate-200">
+              <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Quotations</div>
+              <div className="mt-1 text-lg font-extrabold text-slate-950">{quotations.length}</div>
+            </div>
+            <div className="rounded-2xl bg-slate-50 px-3 py-3 ring-1 ring-slate-200">
+              <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Credit Notes</div>
+              <div className="mt-1 text-lg font-extrabold text-slate-950">{creditNotes.length}</div>
+            </div>
+          </div>
+
+          <div className="mt-3 h-[200px] sm:h-[220px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={series} margin={{ top: 10, right: 0, left: -18, bottom: 0 }} barCategoryGap={14}>
+                <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#e2e8f0" />
+                <XAxis
+                  dataKey="label"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fill: "#64748b", fontSize: 11, fontWeight: 600 }}
+                />
+                <YAxis
+                  axisLine={false}
+                  tickLine={false}
+                  width={56}
+                  tick={{ fill: "#64748b", fontSize: 11, fontWeight: 600 }}
+                  tickFormatter={(v) => moneyShort(Number(v))}
+                />
+                <Tooltip content={<PremiumTooltip />} />
+                <Bar
+                  dataKey="collections"
+                  name="Collections"
+                  fill="#071b38"
+                  radius={[10, 10, 0, 0]}
+                  isAnimationActive={false}
+                  maxBarSize={20}
+                />
+                <Bar
+                  dataKey="credits"
+                  name="Credits"
+                  fill="#ff8a1e"
+                  radius={[10, 10, 0, 0]}
+                  isAnimationActive={false}
+                  maxBarSize={20}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </ShellCard>
+      </div>
+
+      <ShellCard className="p-4 sm:p-5">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-sm font-extrabold tracking-tight text-slate-950">Top Due Customers</div>
+          <div className="text-xs font-semibold text-slate-500">{fmtDateTime(new Date())}</div>
+        </div>
+
+        <div className="mt-3 overflow-hidden rounded-2xl border border-slate-200">
+          <div className="hidden grid-cols-12 bg-slate-50 px-3 py-3 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500 md:grid">
+            <div className="col-span-4">Customer</div>
+            <div className="col-span-2 text-right">Total Due</div>
+            <div className="col-span-2 text-right">30+</div>
+            <div className="col-span-2 text-right">60+</div>
+            <div className="col-span-2 text-right">90+</div>
+          </div>
+
+          <div className="divide-y divide-slate-200 bg-white">
+            {dueRows.length === 0 ? (
+              <div className="px-4 py-10 text-center text-sm text-slate-500">
+                No outstanding balances
+              </div>
+            ) : (
+              dueRows.map((r, i) => (
+                <div key={`${r.customer}-${i}`}>
+                  <div className="hidden grid-cols-12 px-3 py-3 text-sm md:grid">
+                    <div className="col-span-4 min-w-0">
+                      <div className="truncate font-semibold text-slate-900">{r.customer}</div>
+                      <div className="mt-0.5 text-xs text-slate-500">Last: {r.lastInvoice}</div>
+                    </div>
+                    <div className="col-span-2 text-right font-bold text-slate-950">{money(r.totalDue)}</div>
+                    <div className="col-span-2 text-right text-slate-700">{money(r.overdue30)}</div>
+                    <div className="col-span-2 text-right text-slate-700">{money(r.overdue60)}</div>
+                    <div className="col-span-2 text-right text-slate-700">{money(r.overdue90)}</div>
+                  </div>
+
+                  <div className="space-y-2 px-3 py-3 md:hidden">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate font-semibold text-slate-900">{r.customer}</div>
+                        <div className="text-xs text-slate-500">Last: {r.lastInvoice}</div>
+                      </div>
+                      <div className="text-right text-sm font-extrabold text-slate-950">{money(r.totalDue)}</div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="rounded-xl bg-slate-50 px-2.5 py-2 ring-1 ring-slate-200">
+                        <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">30+</div>
+                        <div className="mt-1 text-xs font-semibold text-slate-900">{money(r.overdue30)}</div>
+                      </div>
+                      <div className="rounded-xl bg-slate-50 px-2.5 py-2 ring-1 ring-slate-200">
+                        <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">60+</div>
+                        <div className="mt-1 text-xs font-semibold text-slate-900">{money(r.overdue60)}</div>
+                      </div>
+                      <div className="rounded-xl bg-slate-50 px-2.5 py-2 ring-1 ring-slate-200">
+                        <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">90+</div>
+                        <div className="mt-1 text-xs font-semibold text-slate-900">{money(r.overdue90)}</div>
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </Card3D>
-            </FadeInCard>
-
-            <FadeInCard delayMs={120} className="h-full">
-              <Card3D glow="neutral" className="p-6">
-                <div className="text-base font-bold tracking-tight text-slate-950">Invoices & Cash</div>
-                <div className="mt-1 text-sm text-slate-600">Volume of monthly invoice activity against cash received.</div>
-
-                <div className="mt-4 h-[260px] rounded-[24px] bg-[linear-gradient(180deg,#fbfdff_0%,#f8fafc_100%)] p-3 ring-1 ring-slate-200">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={series} margin={{ top: 18, right: 16, left: 8, bottom: 8 }} barCategoryGap={18}>
-                      <CartesianGrid strokeDasharray="4 4" stroke="#cbd5e1" vertical={false} />
-                      <XAxis
-                        dataKey="name"
-                        tickLine={false}
-                        axisLine={false}
-                        tick={{ fill: "#475569", fontSize: 12, fontWeight: 600 }}
-                      />
-                      <YAxis
-                        tickLine={false}
-                        axisLine={false}
-                        tick={{ fill: "#475569", fontSize: 12, fontWeight: 600 }}
-                        tickFormatter={(v) => (Number(v) >= 1000 ? `${Math.round(Number(v) / 1000)}k` : String(v))}
-                        width={60}
-                      />
-                      <Tooltip content={<PremiumTooltip />} />
-                      <Bar
-                        dataKey="invoices"
-                        name="Invoices"
-                        fill="#071b38"
-                        radius={[12, 12, 0, 0]}
-                        maxBarSize={26}
-                        isAnimationActive
-                        animationDuration={850}
-                      />
-                      <Bar
-                        dataKey="cash"
-                        name="Cash"
-                        fill="#ff8a1e"
-                        radius={[12, 12, 0, 0]}
-                        maxBarSize={26}
-                        isAnimationActive
-                        animationDuration={850}
-                      />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-
-                <div className="mt-3 text-xs text-slate-500">
-                  Collections are calculated from real invoice paid amounts.
-                </div>
-              </Card3D>
-            </FadeInCard>
+              ))
+            )}
           </div>
         </div>
 
-        {/* Bottom row */}
-        <div className="grid grid-cols-1 items-stretch gap-4 2xl:grid-cols-3">
-          <FadeInCard delayMs={140} className="h-full 2xl:col-span-2">
-            <Card3D glow="navy" className="h-full p-6">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <div className="text-base font-bold tracking-tight text-slate-950">Receivables Aging</div>
-                  <div className="mt-1 text-sm text-slate-600">Outstanding balances split by aging bucket.</div>
-                </div>
-                <div className="rounded-full bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
-                  {money(totalAging)} total
-                </div>
-              </div>
-
-              <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[340px_1fr]">
-                <div className="h-[290px] rounded-[24px] bg-[linear-gradient(180deg,#fbfdff_0%,#f8fafc_100%)] p-3 ring-1 ring-slate-200">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Tooltip content={<PremiumTooltip />} />
-                      <Pie
-                        data={aging}
-                        dataKey="value"
-                        nameKey="name"
-                        innerRadius={64}
-                        outerRadius={108}
-                        paddingAngle={3}
-                        stroke="rgba(255,255,255,0.92)"
-                        strokeWidth={2}
-                        isAnimationActive
-                        animationDuration={850}
-                      >
-                        {aging.map((_, i) => (
-                          <Cell key={i} fill={pieColors[i % pieColors.length]} />
-                        ))}
-                      </Pie>
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-
-                <div className="grid gap-3">
-                  {aging.map((b, i) => {
-                    const pct = totalAging ? (b.value / totalAging) * 100 : 0;
-                    return (
-                      <div key={b.name} className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-sm font-semibold text-slate-800">{b.name}</div>
-                          <div className="text-sm font-extrabold text-slate-900">{money(b.value)}</div>
-                        </div>
-                        <div className="mt-3 h-2.5 w-full overflow-hidden rounded-full bg-slate-200">
-                          <div
-                            className="h-full rounded-full"
-                            style={{
-                              width: `${clamp(pct, 2, 100)}%`,
-                              background: pieColors[i % pieColors.length],
-                              transition: "width 650ms ease",
-                            }}
-                          />
-                        </div>
-                        <div className="mt-1 text-xs text-slate-500">{pct.toFixed(1)}%</div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </Card3D>
-          </FadeInCard>
-
-          <FadeInCard delayMs={170} className="h-full">
-            <Card3D glow="orange" className="h-full p-6">
-              <div className="text-base font-bold tracking-tight text-slate-950">Quick Actions</div>
-              <div className="mt-1 text-sm text-slate-600">Fast access to the most-used workflows.</div>
-
-              <div className="mt-4 grid gap-3">
-                <Button
-                  className="h-12 w-full justify-between rounded-2xl bg-[#071b38] px-4 text-white shadow-[0_14px_40px_rgba(7,27,56,0.18)] hover:bg-[#06142b]"
-                  onClick={() => router.push("/sales/invoices/new")}
-                >
-                  <span className="inline-flex items-center gap-2">
-                    <FileText className="size-4" />
-                    New Invoice
-                  </span>
-                  <ChevronRight className="size-4" />
-                </Button>
-
-                <Button
-                  variant="outline"
-                  className="h-12 w-full justify-between rounded-2xl"
-                  onClick={() => router.push("/contacts")}
-                >
-                  <span className="inline-flex items-center gap-2">
-                    <Users className="size-4" />
-                    New Customer
-                  </span>
-                  <ChevronRight className="size-4" />
-                </Button>
-
-                <Button
-                  variant="outline"
-                  className="h-12 w-full justify-between rounded-2xl"
-                  onClick={() => router.push("/reports/vat")}
-                >
-                  <span className="inline-flex items-center gap-2">
-                    <BadgePercent className="size-4" />
-                    VAT Report
-                  </span>
-                  <ChevronRight className="size-4" />
-                </Button>
-
-                <Button
-                  variant="outline"
-                  className="h-12 w-full justify-between rounded-2xl"
-                  onClick={() => router.push("/sales/invoices")}
-                >
-                  <span className="inline-flex items-center gap-2">
-                    <CreditCard className="size-4" />
-                    Record Payment
-                  </span>
-                  <ChevronRight className="size-4" />
-                </Button>
-
-                <Button
-                  variant="outline"
-                  className="h-12 w-full justify-between rounded-2xl"
-                  onClick={() => router.push("/reports/soa")}
-                >
-                  <span className="inline-flex items-center gap-2">
-                    <Clock className="size-4" />
-                    Overdue List
-                  </span>
-                  <ChevronRight className="size-4" />
-                </Button>
-              </div>
-
-              <div className="mt-4 rounded-2xl bg-[#ff8a1e]/10 p-4 ring-1 ring-[#ff8a1e]/20">
-                <div className="flex items-center justify-between">
-                  <div className="text-xs font-semibold uppercase tracking-[0.14em] text-[#c25708]">
-                    Live Insight
-                  </div>
-                  <Sparkles className="size-4 text-[#c25708]" />
-                </div>
-                <div className="mt-2 text-sm leading-6 text-[#8a3f06]">
-                  Revenue this month is <span className="font-bold">{money(revenueThisMonth)}</span>. Quotation pipeline is{" "}
-                  <span className="font-bold">{money(quotationPipeline)}</span>.
-                </div>
-              </div>
-
-              <div className="mt-4 rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Master Data</div>
-                <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-                  <div className="rounded-xl bg-white px-3 py-3 ring-1 ring-slate-200">
-                    <div className="text-xs text-slate-500">Customers</div>
-                    <div className="mt-1 text-base font-extrabold text-slate-900">{customers.length}</div>
-                  </div>
-                  <div className="rounded-xl bg-white px-3 py-3 ring-1 ring-slate-200">
-                    <div className="text-xs text-slate-500">Suppliers</div>
-                    <div className="mt-1 text-base font-extrabold text-slate-900">{suppliers.length}</div>
-                  </div>
-                  <div className="rounded-xl bg-white px-3 py-3 ring-1 ring-slate-200">
-                    <div className="text-xs text-slate-500">Quotations</div>
-                    <div className="mt-1 text-base font-extrabold text-slate-900">{quotations.length}</div>
-                  </div>
-                  <div className="rounded-xl bg-white px-3 py-3 ring-1 ring-slate-200">
-                    <div className="text-xs text-slate-500">Credit Notes</div>
-                    <div className="mt-1 text-base font-extrabold text-slate-900">{creditNotes.length}</div>
-                  </div>
-                </div>
-              </div>
-            </Card3D>
-          </FadeInCard>
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <div className="rounded-2xl bg-slate-50 px-3 py-3 ring-1 ring-slate-200">
+            <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Total Sales</div>
+            <div className="mt-1 text-sm font-extrabold text-slate-950">
+              {money(invoices.reduce((s, x) => s + n2(x.total_amount), 0))}
+            </div>
+          </div>
+          <div className="rounded-2xl bg-slate-50 px-3 py-3 ring-1 ring-slate-200">
+            <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Collections</div>
+            <div className="mt-1 text-sm font-extrabold text-slate-950">{money(collections)}</div>
+          </div>
+          <div className="rounded-2xl bg-slate-50 px-3 py-3 ring-1 ring-slate-200">
+            <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Credit Notes</div>
+            <div className="mt-1 text-sm font-extrabold text-slate-950">{money(creditNoteValue)}</div>
+          </div>
         </div>
-
-        {/* Due table */}
-        <FadeInCard delayMs={200}>
-          <Card3D glow="neutral" className="p-6">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <div className="text-base font-bold tracking-tight text-slate-950">Invoice Due Details by Customer</div>
-                <div className="mt-1 text-sm text-slate-600">Top customer exposures with 30 / 60 / 90+ day split.</div>
-              </div>
-              <div className="rounded-full bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
-                Real Data
-              </div>
-            </div>
-
-            <div className="mt-4 overflow-hidden rounded-[24px] ring-1 ring-slate-200">
-              <div className="grid grid-cols-12 bg-slate-50 px-4 py-3 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
-                <div className="col-span-4">Customer</div>
-                <div className="col-span-2 text-right">Total Due</div>
-                <div className="col-span-2 text-right">30+ Days</div>
-                <div className="col-span-2 text-right">60+ Days</div>
-                <div className="col-span-2 text-right">90+ Days</div>
-              </div>
-
-              <div className="divide-y divide-slate-200 bg-white">
-                {dueRows.length === 0 ? (
-                  <div className="px-4 py-12 text-center text-sm text-slate-500">
-                    No outstanding customer balances found.
-                  </div>
-                ) : (
-                  dueRows.map((r, i) => (
-                    <div
-                      key={`${r.customer}-${i}`}
-                      className="grid grid-cols-12 px-4 py-4 text-sm transition-colors hover:bg-slate-50"
-                      style={{ animation: `floatIn 650ms ease ${(i * 55) / 1000}s both` }}
-                    >
-                      <div className="col-span-4">
-                        <div className="font-semibold text-slate-900">{r.customer}</div>
-                        <div className="text-xs text-slate-500">Last invoice: {r.lastInvoice}</div>
-                      </div>
-                      <div className="col-span-2 text-right font-semibold text-slate-950">{money(r.totalDue)}</div>
-                      <div className="col-span-2 text-right text-slate-800">{money(r.overdue30)}</div>
-                      <div className="col-span-2 text-right text-slate-800">{money(r.overdue60)}</div>
-                      <div className="col-span-2 text-right text-slate-800">{money(r.overdue90)}</div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-              <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Total Sales</div>
-                <div className="mt-2 text-lg font-extrabold text-slate-950">
-                  {money(invoices.reduce((s, x) => s + n2(x.total_amount), 0))}
-                </div>
-              </div>
-              <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Collections</div>
-                <div className="mt-2 text-lg font-extrabold text-slate-950">{money(collections)}</div>
-              </div>
-              <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Credit Notes</div>
-                <div className="mt-2 text-lg font-extrabold text-slate-950">{money(creditNoteValue)}</div>
-              </div>
-            </div>
-          </Card3D>
-        </FadeInCard>
-      </div>
-    </>
+      </ShellCard>
+    </div>
   );
 }

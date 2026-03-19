@@ -345,7 +345,7 @@ export default function InvoicePrintPage() {
         stampSrc: "/ks-stamp.png",
         signatureSrc: "/ks-signature.png",
         addressLines: [
-          "Lot No. 15, Morcellement Petite Bretagne, Albion",
+          "MORCELLEMENT CARLOS, TAMARIN",
           "Tel: 5941 6756 • Email: ks.contracting@hotmail.com",
           "BRN: 18160190 • VAT: 27658608",
         ],

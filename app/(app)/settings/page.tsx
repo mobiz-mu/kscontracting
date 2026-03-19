@@ -84,7 +84,7 @@ const DEFAULT_SETTINGS: CompanySettingsRow = {
   company_name: "KS CONTRACTING LTD",
   brn: "18160190",
   vat_no: "27658608",
-  address: "Lot No. 15, Morcellement Petite Bretagne, Albion, Mauritius",
+  address: "MORCELLEMENT CARLOS, TAMARIN, MAURITIUS",
   phone: "59416756",
   email: "ks.contracting@hotmail.com",
   currency: "MUR",

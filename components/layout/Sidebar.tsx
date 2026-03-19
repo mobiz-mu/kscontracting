@@ -15,16 +15,36 @@ import {
   ChevronRight,
   X,
   ShieldAlert,
+  Wallet,
+  ClipboardList,
+  UserPlus,
+  Truck,
+  FolderKanban,
+  FilePlus2,
+  Layers3,
+  BadgeDollarSign,
+  CircleDollarSign,
+  Sparkles,
+  ChevronsUpDown,
 } from "lucide-react";
+
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useSidebarState } from "@/components/layout/SidebarState";
 
-type NavItem = {
+type NavLink = {
   label: string;
   href: string;
   icon: React.ElementType;
-  permissions: string[];
+  permissions?: string[];
+};
+
+type NavGroup = {
+  label: string;
+  icon: React.ElementType;
+  permissions?: string[];
+  children?: NavLink[];
+  href?: string;
 };
 
 type PermissionsResponse = {
@@ -37,59 +57,129 @@ type PermissionsResponse = {
   error?: any;
 };
 
-const NAV: NavItem[] = [
+const NAV_GROUPS: NavGroup[] = [
   {
     label: "Dashboard",
-    href: "/dashboard",
     icon: LayoutDashboard,
     permissions: ["dashboard.view"],
+    href: "/dashboard",
   },
   {
     label: "Invoices",
-    href: "/sales/invoices",
     icon: FileText,
     permissions: ["invoices.view"],
+    children: [
+      {
+        label: "Create Invoice",
+        href: "/sales/invoices/new",
+        icon: FilePlus2,
+        permissions: ["invoices.create", "invoices.view"],
+      },
+      {
+        label: "Payment Effected",
+        href: "/payments/new",
+        icon: Wallet,
+        permissions: ["payments.create", "invoices.view"],
+      },
+      {
+        label: "Payment Report",
+        href: "/payments",
+        icon: BadgeDollarSign,
+        permissions: ["payments.view", "invoices.view"],
+      },
+      {
+        label: "Pending Invoices",
+        href: "/sales/invoices",
+        icon: ClipboardList,
+        permissions: ["invoices.view"],
+      },
+    ],
   },
   {
     label: "Quotations",
-    href: "/sales/quotations",
     icon: Receipt,
     permissions: ["quotations.view"],
+    children: [
+      {
+        label: "New Quote",
+        href: "/sales/quotations/new",
+        icon: FilePlus2,
+        permissions: ["quotations.create", "quotations.view"],
+      },
+      {
+        label: "Convert to Invoice",
+        href: "/sales/quotations",
+        icon: Layers3,
+        permissions: ["quotations.view", "invoices.view"],
+      },
+    ],
   },
   {
     label: "Credit Notes",
-    href: "/sales/credit-notes",
-    icon: Receipt,
+    icon: CircleDollarSign,
     permissions: ["credit_notes.view"],
+    children: [
+      {
+        label: "Create Credit Note",
+        href: "/sales/credit-notes/new",
+        icon: FilePlus2,
+        permissions: ["credit_notes.create", "credit_notes.view"],
+      },
+    ],
+  },
+  {
+    label: "Contract",
+    icon: FolderKanban,
+    permissions: ["contacts.manage"],
+    children: [
+      {
+        label: "New Customer",
+        href: "/contacts?tab=customers",
+        icon: UserPlus,
+        permissions: ["contacts.manage"],
+      },
+      {
+        label: "New Supplier",
+        href: "/contacts?tab=suppliers",
+        icon: Truck,
+        permissions: ["contacts.manage"],
+      },
+    ],
   },
   {
     label: "Reports",
-    href: "/reports",
     icon: BarChart3,
     permissions: ["reports.view"],
+    href: "/reports",
   },
   {
     label: "Contacts",
-    href: "/contacts",
     icon: Users,
     permissions: ["contacts.manage"],
+    href: "/contacts",
   },
   {
     label: "Settings",
-    href: "/settings",
     icon: Settings,
     permissions: ["settings.manage"],
+    href: "/settings",
   },
   {
     label: "Users",
-    href: "/users",
     icon: Users,
     permissions: ["settings.manage"],
+    href: "/users",
   },
 ];
 
 function isActive(pathname: string, href: string) {
-  return pathname === href || (href !== "/dashboard" && pathname.startsWith(href));
+  if (href === "/dashboard") return pathname === href;
+  return pathname === href || pathname.startsWith(href);
+}
+
+function groupHasActive(pathname: string, group: NavGroup) {
+  if (group.href) return isActive(pathname, group.href);
+  return (group.children ?? []).some((item) => isActive(pathname, item.href));
 }
 
 async function safeGet<T>(url: string): Promise<T> {
@@ -113,6 +203,131 @@ async function safeGet<T>(url: string): Promise<T> {
   return JSON.parse(raw) as T;
 }
 
+function hasAccess(required: string[] | undefined, isAdmin: boolean, permissions: string[]) {
+  if (isAdmin) return true;
+  if (!required || required.length === 0) return true;
+  return required.some((perm) => permissions.includes(perm));
+}
+
+function SidebarLink({
+  href,
+  label,
+  icon: Icon,
+  collapsed,
+  active,
+  level = 0,
+}: {
+  href: string;
+  label: string;
+  icon: React.ElementType;
+  collapsed: boolean;
+  active: boolean;
+  level?: number;
+}) {
+  return (
+    <Link
+      href={href}
+      title={collapsed ? label : undefined}
+      className={cn(
+        "group relative flex items-center gap-3 rounded-2xl",
+        collapsed ? "justify-center px-2 py-2.5" : level === 1 ? "px-3 py-2.5 pl-4" : "px-3 py-2.5",
+        "transition-all duration-300 ease-out",
+        "hover:bg-white/8 hover:ring-1 hover:ring-white/10 hover:translate-x-[2px]",
+        active && "bg-white/10 ring-1 ring-white/12 shadow-[0_10px_30px_rgba(255,122,24,0.08)]"
+      )}
+    >
+      {active && (
+        <span className="absolute left-2 top-1/2 h-6 w-1 -translate-y-1/2 rounded-full bg-[#ff7a18] shadow-[0_0_0_6px_rgba(255,122,24,0.12)]" />
+      )}
+
+      <span
+        className={cn(
+          "relative grid place-items-center rounded-2xl ring-1 transition",
+          collapsed ? "size-10" : level === 1 ? "size-9" : "size-10",
+          active ? "bg-white/12 ring-white/16" : "bg-white/7 ring-white/10",
+          "group-hover:bg-white/12"
+        )}
+      >
+        <Icon className={cn(level === 1 ? "size-4" : "size-4.5", active ? "text-white" : "text-white/85")} />
+      </span>
+
+      {!collapsed && (
+        <div className="min-w-0 flex-1">
+          <div className={cn("truncate text-sm font-medium", active ? "text-white" : "text-white/85")}>
+            {label}
+          </div>
+        </div>
+      )}
+
+      <span className="pointer-events-none absolute inset-0 rounded-2xl bg-[linear-gradient(90deg,transparent,rgba(255,122,24,0.08),transparent)] opacity-0 transition group-hover:opacity-100" />
+    </Link>
+  );
+}
+
+function SidebarGroupButton({
+  label,
+  icon: Icon,
+  collapsed,
+  active,
+  open,
+  onClick,
+}: {
+  label: string;
+  icon: React.ElementType;
+  collapsed: boolean;
+  active: boolean;
+  open: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={collapsed ? label : undefined}
+      className={cn(
+        "group relative flex w-full items-center gap-3 rounded-2xl",
+        collapsed ? "justify-center px-2 py-2.5" : "px-3 py-2.5",
+        "transition-all duration-300 ease-out",
+        "hover:bg-white/8 hover:ring-1 hover:ring-white/10 hover:translate-x-[2px]",
+        active && "bg-white/10 ring-1 ring-white/12 shadow-[0_10px_30px_rgba(255,122,24,0.08)]"
+      )}
+    >
+      {active && (
+        <span className="absolute left-2 top-1/2 h-6 w-1 -translate-y-1/2 rounded-full bg-[#ff7a18] shadow-[0_0_0_6px_rgba(255,122,24,0.12)]" />
+      )}
+
+      <span
+        className={cn(
+          "relative grid size-10 place-items-center rounded-2xl ring-1 transition",
+          active ? "bg-white/12 ring-white/16" : "bg-white/7 ring-white/10",
+          "group-hover:bg-white/12"
+        )}
+      >
+        <Icon className={cn("size-4.5", active ? "text-white" : "text-white/85")} />
+      </span>
+
+      {!collapsed && (
+        <>
+          <div className="min-w-0 flex-1 text-left">
+            <div className={cn("truncate text-sm font-medium", active ? "text-white" : "text-white/85")}>
+              {label}
+            </div>
+          </div>
+
+          <ChevronsUpDown
+            className={cn(
+              "size-4 shrink-0 text-white/60 transition-transform duration-300",
+              open && "rotate-180 text-white"
+            )}
+          />
+        </>
+      )}
+
+      <span className="pointer-events-none absolute inset-0 rounded-2xl bg-[linear-gradient(90deg,transparent,rgba(255,122,24,0.08),transparent)] opacity-0 transition group-hover:opacity-100" />
+    </button>
+  );
+}
+
 function SidebarInner({ inDrawer = false }: { inDrawer?: boolean }) {
   const pathname = usePathname();
   const { collapsed, setCollapsed, closeMobile } = useSidebarState();
@@ -121,6 +336,12 @@ function SidebarInner({ inDrawer = false }: { inDrawer?: boolean }) {
   const [permError, setPermError] = React.useState("");
   const [roleKeys, setRoleKeys] = React.useState<string[]>([]);
   const [permissions, setPermissions] = React.useState<string[]>([]);
+  const [openGroups, setOpenGroups] = React.useState<Record<string, boolean>>({
+    Invoices: true,
+    Quotations: true,
+    "Credit Notes": true,
+    Contract: true,
+  });
 
   React.useEffect(() => {
     if (inDrawer) closeMobile();
@@ -164,46 +385,73 @@ function SidebarInner({ inDrawer = false }: { inDrawer?: boolean }) {
 
   const isAdmin = roleKeys.includes("admin");
 
-  const visibleNav = React.useMemo(() => {
-    if (isAdmin) return NAV;
+  const visibleGroups = React.useMemo(() => {
+    return NAV_GROUPS.map((group) => {
+      if (!hasAccess(group.permissions, isAdmin, permissions)) return null;
 
-    return NAV.filter((item) =>
-      item.permissions.some((perm) => permissions.includes(perm))
-    );
+      if (!group.children?.length) return group;
+
+      const children = group.children.filter((child) =>
+        hasAccess(child.permissions, isAdmin, permissions)
+      );
+
+      if (children.length === 0 && !group.href) return null;
+
+      return { ...group, children };
+    }).filter(Boolean) as NavGroup[];
   }, [isAdmin, permissions]);
+
+  React.useEffect(() => {
+    const next: Record<string, boolean> = {};
+    visibleGroups.forEach((group) => {
+      if (group.children?.length) {
+        next[group.label] = groupHasActive(pathname, group);
+      }
+    });
+
+    setOpenGroups((prev) => ({ ...prev, ...next }));
+  }, [pathname, visibleGroups]);
+
+  function toggleGroup(label: string) {
+    if (collapsed) {
+      setCollapsed(false);
+      setTimeout(() => {
+        setOpenGroups((prev) => ({ ...prev, [label]: !prev[label] }));
+      }, 80);
+      return;
+    }
+
+    setOpenGroups((prev) => ({ ...prev, [label]: !prev[label] }));
+  }
 
   return (
     <aside
       className={cn(
         !inDrawer && "sticky top-0",
         "h-[100dvh] shrink-0 overflow-hidden",
-        "border-r border-white/10 shadow-[0_20px_60px_rgba(2,6,23,0.45)]",
-        "bg-[radial-gradient(1100px_900px_at_-220px_-220px,rgba(255,255,255,0.10),transparent_40%),radial-gradient(900px_700px_at_115%_-10%,rgba(255,122,24,0.10),transparent_45%),linear-gradient(180deg,#071b38_0%,#06142b_100%)]",
-        "text-white",
-        "transition-[width] duration-300 ease-in-out",
-        collapsed ? "w-[86px]" : "w-[260px]"
+        "border-r border-white/10 shadow-[0_24px_70px_rgba(2,6,23,0.48)]",
+        "bg-[radial-gradient(1200px_900px_at_-220px_-220px,rgba(255,255,255,0.11),transparent_40%),radial-gradient(900px_700px_at_115%_-10%,rgba(255,122,24,0.11),transparent_45%),linear-gradient(180deg,#071b38_0%,#06142b_45%,#04101f_100%)]",
+        "text-white transition-[width] duration-300 ease-in-out",
+        collapsed ? "w-[86px]" : "w-[300px]"
       )}
     >
       <div className="pointer-events-none absolute inset-y-0 right-0 w-px bg-gradient-to-b from-transparent via-white/12 to-transparent" />
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),transparent_25%,transparent_75%,rgba(255,255,255,0.02))]" />
 
-      {/* TOP */}
       <div className={cn("px-3 pt-3", collapsed ? "pb-2" : "pb-3")}>
         <div className={cn("flex items-center gap-2", collapsed ? "justify-center" : "justify-between")}>
           <Link
             href="/dashboard"
             className={cn(
-              "group flex items-center gap-3 rounded-2xl",
-              "px-2 py-2",
-              "transition hover:bg-white/7 hover:ring-1 hover:ring-white/10"
+              "group flex items-center gap-3 rounded-2xl px-2 py-2 transition",
+              "hover:bg-white/7 hover:ring-1 hover:ring-white/10"
             )}
             title="KS Contracting"
           >
             <span
               className={cn(
-                "relative grid place-items-center rounded-2xl bg-white ring-1 ring-black/5",
-                "shadow-[0_12px_28px_rgba(2,6,23,0.25)]",
-                "transition-transform duration-300 ease-out group-hover:scale-[1.03]",
-                "h-10 w-10"
+                "relative grid h-10 w-10 place-items-center rounded-2xl bg-white ring-1 ring-black/5",
+                "shadow-[0_12px_28px_rgba(2,6,23,0.25)] transition-transform duration-300 group-hover:scale-[1.03]"
               )}
             >
               <Image
@@ -218,8 +466,11 @@ function SidebarInner({ inDrawer = false }: { inDrawer?: boolean }) {
 
             {!collapsed && (
               <div className="leading-tight">
-                <div className="text-[14px] font-semibold tracking-tight">KS Contracting</div>
-                <div className="text-[11px] text-white/60">Accounting Suite</div>
+                <div className="text-[15px] font-semibold tracking-tight">KS Contracting</div>
+                <div className="flex items-center gap-1 text-[11px] text-white/60">
+                  <Sparkles className="size-3" />
+                  Executive Accounting Suite
+                </div>
               </div>
             )}
           </Link>
@@ -262,19 +513,11 @@ function SidebarInner({ inDrawer = false }: { inDrawer?: boolean }) {
         </div>
       </div>
 
-      {/* NAV */}
-      <div className={cn("px-2", "h-[calc(100dvh-76px-88px)] overflow-hidden")}>
-        <div className="mt-2 space-y-1">
+      <div className="h-[calc(100dvh-76px-92px)] overflow-y-auto px-2 pb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="space-y-1.5">
           {loadingPerms ? (
-            Array.from({ length: 6 }).map((_, i) => (
-              <div
-                key={i}
-                className={cn(
-                  "rounded-2xl",
-                  collapsed ? "h-[50px]" : "h-[50px]",
-                  "animate-pulse bg-white/8"
-                )}
-              />
+            Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="h-[52px] animate-pulse rounded-2xl bg-white/8" />
             ))
           ) : permError ? (
             <div
@@ -288,7 +531,7 @@ function SidebarInner({ inDrawer = false }: { inDrawer?: boolean }) {
                 {!collapsed && <span className="text-xs">Permissions unavailable</span>}
               </div>
             </div>
-          ) : visibleNav.length === 0 ? (
+          ) : visibleGroups.length === 0 ? (
             <div
               className={cn(
                 "rounded-2xl border border-white/10 bg-white/8 p-3 text-white/80",
@@ -301,59 +544,77 @@ function SidebarInner({ inDrawer = false }: { inDrawer?: boolean }) {
               </div>
             </div>
           ) : (
-            visibleNav.map((item) => {
-              const active = isActive(pathname, item.href);
-              const Icon = item.icon;
+            visibleGroups.map((group) => {
+              const active = groupHasActive(pathname, group);
+              const hasChildren = !!group.children?.length;
+              const isOpen = !!openGroups[group.label];
+
+              if (!hasChildren && group.href) {
+                return (
+                  <SidebarLink
+                    key={group.label}
+                    href={group.href}
+                    label={group.label}
+                    icon={group.icon}
+                    collapsed={collapsed}
+                    active={active}
+                  />
+                );
+              }
 
               return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  title={collapsed ? item.label : undefined}
+                <div
+                  key={group.label}
                   className={cn(
-                    "group relative flex items-center gap-3 rounded-2xl",
-                    collapsed ? "px-2 py-2.5 justify-center" : "px-3 py-2.5",
-                    "transition-all duration-300 ease-out",
-                    "hover:bg-white/8 hover:ring-1 hover:ring-white/10 hover:translate-x-[2px]",
-                    active && "bg-white/10 ring-1 ring-white/12"
+                    "overflow-hidden rounded-[22px] transition-all duration-300",
+                    active && !collapsed && "bg-white/[0.04] ring-1 ring-white/8"
                   )}
                 >
-                  {active && (
-                    <span className="absolute left-2 top-1/2 -translate-y-1/2 h-6 w-1 rounded-full bg-[#ff7a18] shadow-[0_0_0_6px_rgba(255,122,24,0.12)]" />
-                  )}
-
-                  <span
-                    className={cn(
-                      "relative grid size-10 place-items-center rounded-2xl",
-                      "ring-1 transition",
-                      active ? "bg-white/12 ring-white/16" : "bg-white/7 ring-white/10",
-                      "group-hover:bg-white/12"
-                    )}
-                  >
-                    <Icon className={cn("size-4", active ? "text-white" : "text-white/85")} />
-                    <span className="pointer-events-none absolute inset-0 rounded-2xl opacity-0 transition group-hover:opacity-100 shadow-[0_14px_30px_rgba(2,6,23,0.35)]" />
-                  </span>
+                  <SidebarGroupButton
+                    label={group.label}
+                    icon={group.icon}
+                    collapsed={collapsed}
+                    active={active}
+                    open={isOpen}
+                    onClick={() => toggleGroup(group.label)}
+                  />
 
                   {!collapsed && (
-                    <span className={cn("text-sm font-medium", active ? "text-white" : "text-white/85")}>
-                      {item.label}
-                    </span>
+                    <div
+                      className={cn(
+                        "grid transition-all duration-300 ease-out",
+                        isOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-70"
+                      )}
+                    >
+                      <div className="overflow-hidden">
+                        <div className="space-y-1 px-2 pb-2 pl-3">
+                          {(group.children ?? []).map((child) => (
+                            <SidebarLink
+                              key={child.href}
+                              href={child.href}
+                              label={child.label}
+                              icon={child.icon}
+                              collapsed={false}
+                              active={isActive(pathname, child.href)}
+                              level={1}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    </div>
                   )}
-
-                  <span className="pointer-events-none absolute inset-0 rounded-2xl opacity-0 transition group-hover:opacity-100 bg-[linear-gradient(90deg,transparent,rgba(255,122,24,0.08),transparent)]" />
-                </Link>
+                </div>
               );
             })
           )}
         </div>
       </div>
 
-      {/* BOTTOM */}
       <div className="px-3 pb-3">
         <div
           className={cn(
             "rounded-3xl bg-white/6 ring-1 ring-white/10 shadow-[0_18px_40px_rgba(2,6,23,0.35)]",
-            "transition-transform duration-300 hover:translate-y-[-1px]",
+            "transition-transform duration-300 hover:-translate-y-[1px]",
             collapsed ? "p-2" : "p-3"
           )}
         >
@@ -366,7 +627,7 @@ function SidebarInner({ inDrawer = false }: { inDrawer?: boolean }) {
               <div className="min-w-0">
                 <div className="truncate text-sm font-semibold">KS CONTRACTING LTD</div>
                 <div className="truncate text-[11px] text-white/60">
-                  {isAdmin ? "Admin" : roleKeys.length ? roleKeys.join(", ") : "Restricted user"} • Single company
+                  {isAdmin ? "Admin" : roleKeys.length ? roleKeys.join(", ") : "Restricted user"} • Executive Workspace
                 </div>
               </div>
             )}
@@ -390,7 +651,7 @@ export default function Sidebar() {
         <button
           aria-label="Close sidebar overlay"
           onClick={closeMobile}
-          className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px]"
+          className="fixed inset-0 z-40 bg-black/45 backdrop-blur-[3px]"
         />
         <div className="fixed inset-y-0 left-0 z-50">
           <SidebarInner inDrawer />

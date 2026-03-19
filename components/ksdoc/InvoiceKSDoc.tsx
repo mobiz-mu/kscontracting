@@ -181,7 +181,10 @@ export default function InvoiceKSDoc({
             </div>
 
             <div className="mt-[2.6mm] space-y-[0.8mm] text-[3.8mm] leading-[1.25] text-black">
-              {(data.company.addressLines ?? []).map((line, i) => (
+              {(data.company.addressLines?.length
+                ? data.company.addressLines
+                : ["MORCELLEMENT CARLOS, TAMARIN"]
+              ).map((line, i) => (
                 <div key={i}>{line}</div>
               ))}
             </div>

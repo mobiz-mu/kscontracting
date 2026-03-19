@@ -405,22 +405,28 @@ export default function QuotationsPage() {
   }
 
   function sendWhatsApp(id: string, quoteNo: string, customerName: string | null) {
-    const base = typeof window !== "undefined" ? window.location.origin : "";
-    const printUrl = `${base}/sales/quotations/${encodeURIComponent(id)}/print`;
+  const base = typeof window !== "undefined" ? window.location.origin : "";
+  const printUrl = `${base}/sales/quotations/${encodeURIComponent(id)}/print`;
 
-    const text = [
-      `Dear ${customerName || "Customer"},`,
-      ``,
-      `Please find your quotation ${quoteNo}.`,
-      `You can view / print it here:`,
-      `${printUrl}`,
-      ``,
-      `KS Contracting Ltd`,
-    ].join("\n");
+  const text = [
+    `Dear ${customerName || "Customer"},`,
+    ``,
+    `Please find your quotation ${quoteNo}.`,
+    `You can view / print it here:`,
+    `${printUrl}`,
+    ``,
+    `KS Contracting Ltd`,
+  ].join("\n");
 
-    const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
-    window.open(waUrl, "_blank", "noopener,noreferrer");
-  }
+  const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+  window.open(waUrl, "_blank", "noopener,noreferrer");
+}
+
+function goToConvert(id: string) {
+  if (!id) return;
+  setBusyActionId(id);
+  router.push(`/sales/quotations/${encodeURIComponent(id)}/convert`);
+}
 
   return (
     <div className="space-y-5">
@@ -808,9 +814,16 @@ export default function QuotationsPage() {
 
                               <DropdownMenuSeparator />
 
-                              <DropdownMenuItem className="rounded-xl" disabled>
-                                <Send className="mr-2 size-4" />
-                                Convert to invoice (next)
+                              <DropdownMenuItem
+                                className="rounded-xl"
+                                disabled={!id || isBusy}
+                                onClick={() => {
+                                if (!id) return;
+                                 goToConvert(id);
+                               }}
+                              >
+                               <Send className="mr-2 size-4" />
+                                Convert to invoice
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
@@ -964,9 +977,16 @@ export default function QuotationsPage() {
 
                           <DropdownMenuSeparator />
 
-                          <DropdownMenuItem className="rounded-xl" disabled>
-                            <Send className="mr-2 size-4" />
-                            Convert to invoice (next)
+                          <DropdownMenuItem
+                              className="rounded-xl"
+                              disabled={!id || isBusy}
+                              onClick={() => {
+                              if (!id) return;
+                              goToConvert(id);
+                             }}
+                            >
+                             <Send className="mr-2 size-4" />
+                             Convert to invoice
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>

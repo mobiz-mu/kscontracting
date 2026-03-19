@@ -23,6 +23,8 @@ import {
   Sparkles,
   ChevronDown,
   ClipboardList,
+  PencilLine,
+  ListChecks,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -34,12 +36,13 @@ import { cn } from "@/lib/utils";
 ========================================= */
 
 type InvoiceType = "VAT_INVOICE" | "PRO_FORMA";
+type CustomerMode = "LIST" | "MANUAL";
 
 type Row = {
   id: string;
   description: string;
-  qty: number;
-  price: number;
+  qty: string;
+  price: string;
 };
 
 type Customer = {
@@ -57,8 +60,17 @@ type Customer = {
 ========================================= */
 
 function n2(v: any) {
-  const x = Number(v ?? 0);
+  const s = String(v ?? "").trim();
+  if (!s) return 0;
+  const x = Number(s);
   return Number.isFinite(x) ? x : 0;
+}
+
+function qtyForCalc(v: any) {
+  const s = String(v ?? "").trim();
+  if (!s) return 1;
+  const x = Number(s);
+  return Number.isFinite(x) ? x : 1;
 }
 
 function money(n: number) {
@@ -268,6 +280,8 @@ export default function NewInvoicePage() {
   const custInputRef = React.useRef<HTMLInputElement | null>(null);
   const [spotlight, setSpotlight] = React.useState(false);
 
+  const [customerMode, setCustomerMode] = React.useState<CustomerMode>("LIST");
+
   const [invoiceType, setInvoiceType] = React.useState<InvoiceType>("VAT_INVOICE");
   const [invoiceNo, setInvoiceNo] = React.useState("");
   const [invoiceDate, setInvoiceDate] = React.useState(todayISO());
@@ -282,7 +296,7 @@ export default function NewInvoicePage() {
   const vatRate = 0.15;
 
   const [rows, setRows] = React.useState<Row[]>([
-    { id: crypto.randomUUID(), description: "", qty: 1, price: 0 },
+    { id: crypto.randomUUID(), description: "", qty: "", price: "" },
   ]);
 
   const descRefs = React.useRef<Record<string, HTMLTextAreaElement | null>>({});
@@ -290,7 +304,7 @@ export default function NewInvoicePage() {
   const priceRefs = React.useRef<Record<string, HTMLInputElement | null>>({});
 
   const subtotal = React.useMemo(
-    () => rows.reduce((s, r) => s + n2(r.qty) * n2(r.price), 0),
+    () => rows.reduce((s, r) => s + qtyForCalc(r.qty) * n2(r.price), 0),
     [rows]
   );
   const vat = React.useMemo(() => subtotal * vatRate, [subtotal]);
@@ -317,7 +331,7 @@ export default function NewInvoicePage() {
 
   function addRow(focus: "desc" | "qty" | "price" = "desc") {
     const id = crypto.randomUUID();
-    setRows((p) => [...p, { id, description: "", qty: 1, price: 0 }]);
+    setRows((p) => [...p, { id, description: "", qty: "", price: "" }]);
     requestAnimationFrame(() => {
       if (focus === "desc") descRefs.current[id]?.focus();
       if (focus === "qty") qtyRefs.current[id]?.focus();
@@ -328,12 +342,13 @@ export default function NewInvoicePage() {
   function removeRow(id: string) {
     setRows((p) => {
       const next = p.filter((r) => r.id !== id);
-      return next.length ? next : [{ id: crypto.randomUUID(), description: "", qty: 1, price: 0 }];
+      return next.length ? next : [{ id: crypto.randomUUID(), description: "", qty: "", price: "" }];
     });
   }
 
   function selectCustomer(c: Customer) {
     const name = c.name ?? c.customer_name ?? "";
+    setCustomerMode("LIST");
     setCustomerId(c.id ?? null);
     setCustomerName(name);
     setCustomerVat(c.vat_no ?? "");
@@ -346,13 +361,34 @@ export default function NewInvoicePage() {
     if (first) requestAnimationFrame(() => descRefs.current[first]?.focus());
   }
 
+  function enableManualCustomer() {
+    setCustomerMode("MANUAL");
+    setCustomerId(null);
+    setCustOpen(false);
+    setSpotlight(false);
+  }
+
   function validateBeforeSave() {
     if (!String(invoiceNo || "").trim()) return "Invoice number is required.";
     if (!String(invoiceDate || "").trim()) return "Invoice date is required.";
-    if (!customerId || !Number.isFinite(Number(customerId))) return "Select a customer (required).";
+
+    if (customerMode === "LIST") {
+      if (!customerId || !Number.isFinite(Number(customerId))) {
+        return "Select a customer from the list or switch to manual customer.";
+      }
+    } else {
+      if (!String(customerName || "").trim()) {
+        return "Customer name is required.";
+      }
+    }
 
     const lines = rows
-      .map((r) => ({ ...r, description: String(r.description ?? "").trim() }))
+      .map((r) => ({
+        ...r,
+        description: String(r.description ?? "").trim(),
+        qty: String(r.qty ?? "").trim(),
+        price: String(r.price ?? "").trim(),
+      }))
       .filter((r) => r.description.length > 0);
 
     if (lines.length === 0) return "Add at least one invoice item with a description.";
@@ -363,11 +399,16 @@ export default function NewInvoicePage() {
   function buildPayload(status: "DRAFT" | "ISSUED") {
     return {
       id: invoiceId ?? undefined,
+      invoice_no: invoiceNo,
       status,
       invoice_type: invoiceType,
-      customer_id: Number(customerId),
+      customer_id: customerMode === "LIST" && customerId ? Number(customerId) : null,
+      customer_name: customerName || null,
+      customer_vat: customerVat || null,
+      customer_brn: customerBrn || null,
+      customer_address: customerAddress || null,
+      site_address: siteAddress || null,
       invoice_date: invoiceDate,
-      site_address: siteAddress,
       vat_rate: 0.15,
       subtotal,
       vat_amount: vat,
@@ -375,11 +416,13 @@ export default function NewInvoicePage() {
       paid_amount: 0,
       balance_amount: total,
       notes: null,
-      rows: rows.map((r) => ({
-        description: r.description,
-        qty: r.qty,
-        price: r.price,
-      })),
+      rows: rows
+        .map((r) => ({
+          description: String(r.description || "").trim(),
+          qty: String(r.qty ?? "").trim() === "" ? 1 : qtyForCalc(r.qty),
+          price: n2(r.price),
+        }))
+        .filter((r) => r.description),
     };
   }
 
@@ -463,41 +506,57 @@ export default function NewInvoicePage() {
 
   React.useEffect(() => {
     let alive = true;
+
     (async () => {
       try {
-        const key = "ks.invoice.lastNo";
-        const j = await safeGet<{ ok: boolean; data?: any[] }>("/api/invoices?page=1&pageSize=80");
-        const data = (j?.data ?? []) as Array<{ invoice_no?: string }>;
-        const nums = data
+        const isProForma = invoiceType === "PRO_FORMA";
+        const prefix = isProForma ? "PFI" : "INV";
+        const storageKey = isProForma ? "ks.proforma.lastNo" : "ks.invoice.lastNo";
+
+        const j = await safeGet<{ ok: boolean; data?: any[] }>("/api/invoices?page=1&pageSize=200");
+        const data = (j?.data ?? []) as Array<{
+          invoice_no?: string;
+          invoice_type?: string;
+        }>;
+
+        const filtered = data.filter((x) =>
+          isProForma ? x.invoice_type === "PRO_FORMA" : x.invoice_type === "VAT_INVOICE"
+        );
+
+        const nums = filtered
           .map((x) => parseInvNo(x.invoice_no || ""))
           .filter((n) => Number.isFinite(n)) as number[];
+
         const max = nums.length ? Math.max(...nums) : NaN;
 
         let nextNum = 1;
-        if (Number.isFinite(max)) nextNum = max + 1;
-        else {
+
+        if (Number.isFinite(max)) {
+          nextNum = max + 1;
+        } else {
           let last = 0;
           try {
-            last = Number(localStorage.getItem(key) || "0") || 0;
+            last = Number(localStorage.getItem(storageKey) || "0") || 0;
           } catch {}
           nextNum = last + 1;
         }
 
         try {
-          localStorage.setItem(key, String(nextNum));
+          localStorage.setItem(storageKey, String(nextNum));
         } catch {}
 
         if (!alive) return;
-        setInvoiceNo(`INV-${pad4(nextNum)}`);
+        setInvoiceNo(`${prefix}-${pad4(nextNum)}`);
       } catch {
         if (!alive) return;
-        setInvoiceNo(`INV-${pad4(1)}`);
+        setInvoiceNo(invoiceType === "PRO_FORMA" ? `PFI-${pad4(1)}` : `INV-${pad4(1)}`);
       }
     })();
+
     return () => {
       alive = false;
     };
-  }, []);
+  }, [invoiceType]);
 
   React.useEffect(() => {
     let alive = true;
@@ -585,6 +644,7 @@ export default function NewInvoicePage() {
 
     if (field === "desc") return qtyRefs.current[rowId]?.focus();
     if (field === "qty") return priceRefs.current[rowId]?.focus();
+
     if (field === "price") {
       if (isLast) addRow("desc");
       else {
@@ -614,7 +674,12 @@ export default function NewInvoicePage() {
 
   return (
     <div className="space-y-5">
-      {/* Header */}
+      {toast ? (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          {toast}
+        </div>
+      ) : null}
+
       <Surface className="overflow-hidden">
         <div className="absolute inset-0 bg-[linear-gradient(135deg,#071b38_0%,#0d2c59_48%,#163d73_100%)]" />
         <div className="absolute inset-0 opacity-80 bg-[radial-gradient(900px_320px_at_-10%_-20%,rgba(255,255,255,0.14),transparent_55%),radial-gradient(700px_300px_at_110%_0%,rgba(255,153,51,0.20),transparent_50%)]" />
@@ -642,8 +707,8 @@ export default function NewInvoicePage() {
               </h1>
 
               <p className="mt-2 max-w-4xl text-sm leading-6 text-blue-50/90 sm:text-[15px]">
-                Luxury enterprise invoice builder for KS Contracting with keyboard-first entry,
-                large work-description fields, customer search, live totals, and real-time print-ready preview.
+                Premium invoice entry for KS Contracting with clean empty numeric fields, customer search,
+                manual customer option, live totals, and print-ready preview.
               </p>
 
               {invoiceId ? (
@@ -696,7 +761,7 @@ export default function NewInvoicePage() {
               </Chip>
               <Chip className="bg-white/12 text-white ring-white/15">
                 <Hash className="size-3.5 text-white/85" />
-                {invoiceNo || "INV-—"}
+                {invoiceNo || "—"}
               </Chip>
               <Chip className="bg-white/12 text-white ring-white/15">
                 <Calendar className="size-3.5 text-white/85" />
@@ -729,14 +794,13 @@ export default function NewInvoicePage() {
 
       <div className={cn("grid grid-cols-1 gap-4", showPreview && "2xl:grid-cols-[1.2fr_0.8fr]")}>
         <div className="space-y-4">
-          {/* Invoice details */}
           <Surface>
             <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <div className="text-base font-bold tracking-tight text-slate-950">Invoice Details</div>
                   <div className="mt-1 text-sm text-slate-600">
-                    Executive invoice setup with automatic numbering and fixed VAT control.
+                    Executive invoice setup with separate numbering for VAT invoices and pro forma invoices.
                   </div>
                 </div>
                 <Chip tone="orange">VAT Fixed 15%</Chip>
@@ -783,14 +847,13 @@ export default function NewInvoicePage() {
             </div>
           </Surface>
 
-          {/* Customer */}
           <Surface>
             <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="text-base font-bold tracking-tight text-slate-950">Customer & Site</div>
                   <div className="mt-1 text-sm text-slate-600">
-                    Search and populate client records quickly from your customer register.
+                    Select an existing customer from the list or switch to manual entry.
                   </div>
                 </div>
                 <Chip tone="orange" className="px-2.5 py-1">
@@ -800,6 +863,36 @@ export default function NewInvoicePage() {
             </div>
 
             <div className="p-4 sm:p-5">
+              <div className="mb-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCustomerMode("LIST")}
+                  className={cn(
+                    "inline-flex h-11 items-center gap-2 rounded-2xl px-4 text-sm font-semibold ring-1 transition",
+                    customerMode === "LIST"
+                      ? "bg-[#ff8a1e] text-white ring-[#ff8a1e]"
+                      : "bg-white text-slate-700 ring-slate-200 hover:bg-slate-50"
+                  )}
+                >
+                  <ListChecks className="size-4" />
+                  Select from List
+                </button>
+
+                <button
+                  type="button"
+                  onClick={enableManualCustomer}
+                  className={cn(
+                    "inline-flex h-11 items-center gap-2 rounded-2xl px-4 text-sm font-semibold ring-1 transition",
+                    customerMode === "MANUAL"
+                      ? "bg-[#071b38] text-white ring-[#071b38]"
+                      : "bg-white text-slate-700 ring-slate-200 hover:bg-slate-50"
+                  )}
+                >
+                  <PencilLine className="size-4" />
+                  Manual Customer
+                </button>
+              </div>
+
               <div ref={custBoxRef}>
                 <IconLabel icon={Search} label="Search Customer" />
                 <SpotlightShell active={spotlight}>
@@ -824,12 +917,12 @@ export default function NewInvoicePage() {
                         "h-12 rounded-[20px] border-0 bg-transparent pl-10 pr-3 shadow-none",
                         "focus-visible:ring-2 focus-visible:ring-[#ff8a1e]/25"
                       )}
-                      disabled={busy}
+                      disabled={busy || customerMode === "MANUAL"}
                     />
                   </div>
                 </SpotlightShell>
 
-                {custOpen && (
+                {customerMode === "LIST" && custOpen && (
                   <div className="mt-2 overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200 shadow-[0_18px_55px_rgba(2,6,23,0.12)]">
                     <div className="max-h-[300px] overflow-auto">
                       {filteredCustomers.length === 0 ? (
@@ -880,6 +973,7 @@ export default function NewInvoicePage() {
                     onChange={(e) => setCustomerName(e.target.value)}
                     className="h-12 rounded-2xl"
                     disabled={busy}
+                    placeholder={customerMode === "MANUAL" ? "Enter customer name" : "Selected customer name"}
                   />
                 </div>
 
@@ -890,7 +984,7 @@ export default function NewInvoicePage() {
                     onChange={(e) => setSiteAddress(e.target.value)}
                     className="h-12 rounded-2xl"
                     disabled={busy}
-                    placeholder="Albion"
+                    placeholder="Enter site address"
                   />
                 </div>
 
@@ -901,6 +995,7 @@ export default function NewInvoicePage() {
                     onChange={(e) => setCustomerVat(e.target.value)}
                     className="h-12 rounded-2xl"
                     disabled={busy}
+                    placeholder="Enter VAT number"
                   />
                 </div>
 
@@ -911,6 +1006,7 @@ export default function NewInvoicePage() {
                     onChange={(e) => setCustomerBrn(e.target.value)}
                     className="h-12 rounded-2xl"
                     disabled={busy}
+                    placeholder="Enter BRN number"
                   />
                 </div>
 
@@ -928,15 +1024,13 @@ export default function NewInvoicePage() {
             </div>
           </Surface>
 
-          {/* Items */}
           <Surface>
             <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                   <div className="text-base font-bold tracking-tight text-slate-950">Invoice Items</div>
                   <div className="mt-1 text-sm text-slate-600">
-                    Large description entry made for detailed contracting works, bill of work notes,
-                    material scope, and quotation references.
+                    All numeric fields stay empty until figures are entered.
                   </div>
                 </div>
 
@@ -956,7 +1050,8 @@ export default function NewInvoicePage() {
 
             <div className="space-y-4 p-4 sm:p-5">
               {rows.map((r, index) => {
-                const amt = n2(r.qty) * n2(r.price);
+                const amt = qtyForCalc(r.qty) * n2(r.price);
+
                 return (
                   <div
                     key={r.id}
@@ -993,10 +1088,10 @@ export default function NewInvoicePage() {
                           onChange={(e) => updateRow(r.id, { description: e.target.value })}
                           onKeyDown={(e) => onRowKeyDown(e, r.id, "desc")}
                           className="min-h-[180px] w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:ring-2 focus:ring-[#ff8a1e]/25"
-                          placeholder="Example:
+                          placeholder={`Example:
 Supply and installation of false ceiling works as per approved quotation.
 Include labour, fixing accessories, finishing, and site coordination details.
-You can also add phases, materials, quotation reference, and special notes here."
+You can also add phases, materials, quotation reference, and special notes here.`}
                           disabled={busy}
                         />
                       </div>
@@ -1008,11 +1103,14 @@ You can also add phases, materials, quotation reference, and special notes here.
                             qtyRefs.current[r.id] = el;
                           }}
                           type="number"
+                          inputMode="decimal"
                           value={r.qty}
-                          onChange={(e) => updateRow(r.id, { qty: Number(e.target.value || 0) })}
+                          onChange={(e) => updateRow(r.id, { qty: e.target.value })}
+                          onFocus={(e) => e.currentTarget.select()}
                           onKeyDown={(e) => onRowKeyDown(e, r.id, "qty")}
                           className="h-12 rounded-2xl text-right font-semibold"
                           disabled={busy}
+                          placeholder="Qty"
                         />
                       </div>
 
@@ -1023,11 +1121,14 @@ You can also add phases, materials, quotation reference, and special notes here.
                             priceRefs.current[r.id] = el;
                           }}
                           type="number"
+                          inputMode="decimal"
                           value={r.price}
-                          onChange={(e) => updateRow(r.id, { price: Number(e.target.value || 0) })}
+                          onChange={(e) => updateRow(r.id, { price: e.target.value })}
+                          onFocus={(e) => e.currentTarget.select()}
                           onKeyDown={(e) => onRowKeyDown(e, r.id, "price")}
                           className="h-12 rounded-2xl text-right font-semibold"
                           disabled={busy}
+                          placeholder="0.00"
                         />
 
                         <div className="mt-3 rounded-2xl bg-white px-4 py-3 text-right ring-1 ring-slate-200">
@@ -1051,7 +1152,6 @@ You can also add phases, materials, quotation reference, and special notes here.
           </Surface>
         </div>
 
-        {/* Preview */}
         {showPreview && (
           <div className="2xl:sticky 2xl:top-[92px] h-fit">
             <Surface>
@@ -1074,9 +1174,7 @@ You can also add phases, materials, quotation reference, and special notes here.
                 <div className="overflow-hidden rounded-[24px] border border-slate-300 bg-white">
                   <div className="border-b border-slate-300 px-4 py-5 text-center">
                     <div className="text-lg font-extrabold text-slate-900">KS CONTRACTING LTD</div>
-                    <div className="mt-1 text-xs text-slate-600">
-                      Lot No. 15, Morcellement Petite Bretagne, Albion
-                    </div>
+                    <div className="mt-1 text-xs text-slate-600">MORCELLEMENT CARLOS, TAMARIN</div>
                     <div className="text-xs text-slate-600">
                       Tel: 59416756 • Email: ks.contracting@hotmail.com
                     </div>
@@ -1133,12 +1231,14 @@ You can also add phases, materials, quotation reference, and special notes here.
                       <div className="divide-y divide-slate-200">
                         {rows.map((r) => (
                           <div key={r.id} className="grid grid-cols-12 px-3 py-3 text-xs">
-                            <div className="col-span-2 font-semibold text-slate-800">{n2(r.qty)}</div>
+                            <div className="col-span-2 font-semibold text-slate-800">
+                              {String(r.qty).trim() ? r.qty : "—"}
+                            </div>
                             <div className="col-span-7 whitespace-pre-wrap break-words text-slate-800">
                               {r.description || "—"}
                             </div>
                             <div className="col-span-3 text-right font-bold text-slate-900">
-                              {money(n2(r.qty) * n2(r.price))}
+                              {money(qtyForCalc(r.qty) * n2(r.price))}
                             </div>
                           </div>
                         ))}

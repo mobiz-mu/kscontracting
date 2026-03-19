@@ -16,7 +16,6 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
 
 type QuoteItem = {
   id: number | string;
@@ -26,6 +25,8 @@ type QuoteItem = {
   vat_rate?: number;
   vat_amount?: number;
   line_total?: number;
+  price?: number;
+  total?: number;
 };
 
 type Quote = {
@@ -151,8 +152,14 @@ export default function ConvertQuotationPage() {
       const json = await res.json().catch(() => null);
 
       if (!res.ok || !json?.ok) {
-        throw new Error(json?.error?.message ?? json?.error ?? "Failed to convert quotation");
-      }
+        throw new Error(
+            json?.supabaseError?.message ||
+            json?.supabaseError?.details ||
+            json?.error?.message ||
+            json?.error ||
+            "Failed to convert quotation"
+           );
+          }
 
       const invoiceId = String(json?.data?.invoice_id ?? "").trim();
 
@@ -174,19 +181,11 @@ export default function ConvertQuotationPage() {
   }
 
   if (loading) {
-    return (
-      <div className="p-8 text-sm text-slate-500">
-        Loading quotation...
-      </div>
-    );
+    return <div className="p-8 text-sm text-slate-500">Loading quotation...</div>;
   }
 
   if (!quote) {
-    return (
-      <div className="p-8 text-sm text-rose-600">
-        {error || "Quotation not found"}
-      </div>
-    );
+    return <div className="p-8 text-sm text-rose-600">{error || "Quotation not found"}</div>;
   }
 
   const busy = converting || issuing;
@@ -318,11 +317,11 @@ export default function ConvertQuotationPage() {
                       </div>
                       <div className="md:col-span-2 md:text-right text-sm text-slate-700">
                         <span className="md:hidden text-slate-500">Price: </span>
-                        {money(item.unit_price_excl_vat)}
+                        {money(item.unit_price_excl_vat ?? item.price)}
                       </div>
                       <div className="md:col-span-2 md:text-right text-sm font-extrabold text-slate-900">
                         <span className="md:hidden text-slate-500">Total: </span>
-                        {money(item.line_total)}
+                        {money(item.line_total ?? item.total)}
                       </div>
                     </div>
                   </div>
