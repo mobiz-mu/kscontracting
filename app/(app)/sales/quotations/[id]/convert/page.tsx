@@ -8,10 +8,11 @@ import {
   CheckCircle2,
   FileText,
   Loader2,
-  Send,
   Calendar,
   Clock3,
   Building2,
+  ArrowUpRight,
+  ShieldCheck,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -25,8 +26,6 @@ type QuoteItem = {
   vat_rate?: number;
   vat_amount?: number;
   line_total?: number;
-  price?: number;
-  total?: number;
 };
 
 type Quote = {
@@ -45,6 +44,7 @@ type Quote = {
   vat_amount?: number | null;
   total_amount?: number | null;
   site_address?: string | null;
+  converted_invoice_id?: string | null;
   items?: QuoteItem[];
 };
 
@@ -83,6 +83,13 @@ function todayISO() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function statusTone(status?: string | null) {
+  const s = String(status ?? "").toUpperCase();
+  if (s === "ACCEPTED") return "bg-emerald-50 text-emerald-700 ring-emerald-200";
+  if (s === "VOID") return "bg-rose-50 text-rose-700 ring-rose-200";
+  return "bg-slate-50 text-slate-700 ring-slate-200";
+}
+
 export default function ConvertQuotationPage() {
   const params = useParams();
   const router = useRouter();
@@ -90,7 +97,6 @@ export default function ConvertQuotationPage() {
 
   const [loading, setLoading] = React.useState(true);
   const [converting, setConverting] = React.useState(false);
-  const [issuing, setIssuing] = React.useState(false);
   const [error, setError] = React.useState("");
 
   const [quote, setQuote] = React.useState<Quote | null>(null);
@@ -113,6 +119,11 @@ export default function ConvertQuotationPage() {
       setQuote(q);
       setInvoiceDate(todayISO());
       setDueDate(q?.valid_until || "");
+
+      if (q?.converted_invoice_id) {
+        router.replace(`/sales/invoices/${encodeURIComponent(q.converted_invoice_id)}`);
+        return;
+      }
     } catch (e: any) {
       setError(e?.message || "Failed to load quotation");
       setQuote(null);
@@ -126,17 +137,22 @@ export default function ConvertQuotationPage() {
     void load();
   }, [id]);
 
-  async function doConvert(issueNow: boolean) {
+  async function doConvert() {
     try {
       if (!quote?.id) return;
 
+      if (String(quote.status ?? "").toUpperCase() !== "ACCEPTED") {
+        setError("Only accepted quotations can be converted to invoice.");
+        return;
+      }
+
       if (!quote.customer_id) {
-        setError("This quotation is missing a linked customer and cannot be converted yet.");
+        setError("This quotation is missing a linked customer and cannot be converted.");
         return;
       }
 
       setError("");
-      issueNow ? setIssuing(true) : setConverting(true);
+      setConverting(true);
 
       const res = await fetch(`/api/quotations/${encodeURIComponent(quote.id)}/convert`, {
         method: "POST",
@@ -145,21 +161,15 @@ export default function ConvertQuotationPage() {
           invoice_type: "VAT_INVOICE",
           invoice_date: invoiceDate,
           due_date: dueDate || null,
-          issue_now: issueNow,
+          issue_now: false,
         }),
       });
 
       const json = await res.json().catch(() => null);
 
       if (!res.ok || !json?.ok) {
-        throw new Error(
-            json?.supabaseError?.message ||
-            json?.supabaseError?.details ||
-            json?.error?.message ||
-            json?.error ||
-            "Failed to convert quotation"
-           );
-          }
+        throw new Error(json?.error?.message ?? json?.error ?? "Failed to convert quotation");
+      }
 
       const invoiceId = String(json?.data?.invoice_id ?? "").trim();
 
@@ -167,28 +177,33 @@ export default function ConvertQuotationPage() {
         throw new Error("Invoice created but invoice id missing in response");
       }
 
-      if (issueNow) {
-        window.open(`/sales/invoices/${encodeURIComponent(invoiceId)}/print`, "_blank", "noopener,noreferrer");
-      }
-
       router.push(`/sales/invoices/${encodeURIComponent(invoiceId)}`);
     } catch (e: any) {
       setError(e?.message || "Failed to convert quotation");
     } finally {
       setConverting(false);
-      setIssuing(false);
     }
   }
 
   if (loading) {
-    return <div className="p-8 text-sm text-slate-500">Loading quotation...</div>;
+    return (
+      <div className="p-8 text-sm text-slate-500">
+        Loading quotation...
+      </div>
+    );
   }
 
   if (!quote) {
-    return <div className="p-8 text-sm text-rose-600">{error || "Quotation not found"}</div>;
+    return (
+      <div className="p-8 text-sm text-rose-600">
+        {error || "Quotation not found"}
+      </div>
+    );
   }
 
-  const busy = converting || issuing;
+  const status = String(quote.status ?? "DRAFT").toUpperCase();
+  const canConvert = status === "ACCEPTED" && !quote.converted_invoice_id;
+  const busy = converting;
 
   return (
     <div className="space-y-5">
@@ -206,7 +221,7 @@ export default function ConvertQuotationPage() {
               </Link>
 
               <h1 className="mt-2 text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl">
-                Convert Quotation to Invoice
+                Convert Quote to Invoice
               </h1>
 
               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
@@ -214,36 +229,55 @@ export default function ConvertQuotationPage() {
                   <FileText className="size-3.5 text-slate-500" />
                   {quote.quote_no || quote.quotation_no || "—"}
                 </span>
-                <span className="inline-flex items-center gap-2 rounded-full bg-[#ff8a1e]/10 px-3 py-1 font-semibold text-[#c25708] ring-1 ring-[#ff8a1e]/20">
+
+                <span
+                  className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-semibold ring-1 ${statusTone(status)}`}
+                >
                   <CheckCircle2 className="size-3.5" />
-                  Convert to VAT Invoice
+                  {status}
                 </span>
+
+                {quote.converted_invoice_id ? (
+                  <span className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 font-semibold text-blue-700 ring-1 ring-blue-200">
+                    <ShieldCheck className="size-3.5" />
+                    Already Converted
+                  </span>
+                ) : null}
               </div>
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button
-                variant="outline"
-                className="rounded-2xl"
-                onClick={() => void doConvert(false)}
-                disabled={busy}
-              >
-                {converting ? <Loader2 className="mr-2 size-4 animate-spin" /> : <FileText className="mr-2 size-4" />}
-                Convert as Draft
-              </Button>
-
-              <Button
-                className="rounded-2xl bg-[#071b38] text-white hover:bg-[#06142b]"
-                onClick={() => void doConvert(true)}
-                disabled={busy}
-              >
-                {issuing ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Send className="mr-2 size-4" />}
-                Convert, Issue & Print
-              </Button>
+              {quote.converted_invoice_id ? (
+                <Link href={`/sales/invoices/${encodeURIComponent(quote.converted_invoice_id)}`}>
+                  <Button className="rounded-2xl bg-[#071b38] text-white hover:bg-[#06142b]">
+                    <ArrowUpRight className="mr-2 size-4" />
+                    Open Invoice
+                  </Button>
+                </Link>
+              ) : (
+                <Button
+                  className="rounded-2xl bg-[#071b38] text-white hover:bg-[#06142b]"
+                  onClick={() => void doConvert()}
+                  disabled={!canConvert || busy}
+                >
+                  {converting ? (
+                    <Loader2 className="mr-2 size-4 animate-spin" />
+                  ) : (
+                    <FileText className="mr-2 size-4" />
+                  )}
+                  Convert to Invoice
+                </Button>
+              )}
             </div>
           </div>
         </div>
       </div>
+
+      {status !== "ACCEPTED" && !quote.converted_invoice_id ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          This quotation is still a quote. Accept the quotation first, then the system will allow conversion to invoice.
+        </div>
+      ) : null}
 
       {error ? (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -311,17 +345,17 @@ export default function ConvertQuotationPage() {
                           {item.description}
                         </div>
                       </div>
-                      <div className="md:col-span-1 md:text-right text-sm text-slate-700">
-                        <span className="md:hidden text-slate-500">Qty: </span>
+                      <div className="text-sm text-slate-700 md:col-span-1 md:text-right">
+                        <span className="text-slate-500 md:hidden">Qty: </span>
                         {n2(item.qty)}
                       </div>
-                      <div className="md:col-span-2 md:text-right text-sm text-slate-700">
-                        <span className="md:hidden text-slate-500">Price: </span>
-                        {money(item.unit_price_excl_vat ?? item.price)}
+                      <div className="text-sm text-slate-700 md:col-span-2 md:text-right">
+                        <span className="text-slate-500 md:hidden">Price: </span>
+                        {money(item.unit_price_excl_vat)}
                       </div>
-                      <div className="md:col-span-2 md:text-right text-sm font-extrabold text-slate-900">
-                        <span className="md:hidden text-slate-500">Total: </span>
-                        {money(item.line_total ?? item.total)}
+                      <div className="text-sm font-extrabold text-slate-900 md:col-span-2 md:text-right">
+                        <span className="text-slate-500 md:hidden">Total: </span>
+                        {money(item.line_total)}
                       </div>
                     </div>
                   </div>
@@ -346,7 +380,7 @@ export default function ConvertQuotationPage() {
                   value={invoiceDate}
                   onChange={(e) => setInvoiceDate(e.target.value)}
                   className="h-11 rounded-2xl"
-                  disabled={busy}
+                  disabled={busy || !canConvert}
                 />
               </div>
 
@@ -360,7 +394,7 @@ export default function ConvertQuotationPage() {
                   value={dueDate}
                   onChange={(e) => setDueDate(e.target.value)}
                   className="h-11 rounded-2xl"
-                  disabled={busy}
+                  disabled={busy || !canConvert}
                 />
               </div>
 

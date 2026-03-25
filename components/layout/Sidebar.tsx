@@ -113,7 +113,7 @@ const NAV_GROUPS: NavGroup[] = [
       },
       {
         label: "Convert to Invoice",
-        href: "/sales/quotations",
+        href: "/sales/quotations/convert",
         icon: Layers3,
         permissions: ["quotations.view", "invoices.view"],
       },

@@ -8,15 +8,14 @@ import {
   CheckCircle2,
   FileText,
   Loader2,
-  Send,
   Calendar,
-  Clock3,
   Building2,
+  ArrowUpRight,
+  Printer,
+  XCircle,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
 
 type QuoteItem = {
   id: number | string;
@@ -44,6 +43,8 @@ type Quote = {
   vat_amount?: number | null;
   total_amount?: number | null;
   site_address?: string | null;
+  converted_invoice_id?: string | null;
+  notes?: string | null;
   items?: QuoteItem[];
 };
 
@@ -74,27 +75,31 @@ function fmtDate(v?: string | null) {
   return `${dd}/${mm}/${yyyy}`;
 }
 
-function todayISO() {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
+function statusClasses(status?: string | null) {
+  const s = String(status ?? "").toUpperCase();
+
+  if (s === "ACCEPTED") {
+    return "bg-emerald-50 text-emerald-700 ring-emerald-200";
+  }
+
+  if (s === "VOID") {
+    return "bg-rose-50 text-rose-700 ring-rose-200";
+  }
+
+  return "bg-slate-50 text-slate-700 ring-slate-200";
 }
 
-export default function ConvertQuotationPage() {
+export default function QuotationDetailsPage() {
   const params = useParams();
   const router = useRouter();
   const id = params?.id as string;
 
   const [loading, setLoading] = React.useState(true);
-  const [converting, setConverting] = React.useState(false);
-  const [issuing, setIssuing] = React.useState(false);
+  const [accepting, setAccepting] = React.useState(false);
+  const [voiding, setVoiding] = React.useState(false);
   const [error, setError] = React.useState("");
 
   const [quote, setQuote] = React.useState<Quote | null>(null);
-  const [invoiceDate, setInvoiceDate] = React.useState(todayISO());
-  const [dueDate, setDueDate] = React.useState("");
 
   async function load() {
     try {
@@ -108,10 +113,7 @@ export default function ConvertQuotationPage() {
         throw new Error(json?.error ?? "Failed to load quotation");
       }
 
-      const q = json.data as Quote;
-      setQuote(q);
-      setInvoiceDate(todayISO());
-      setDueDate(q?.valid_until || "");
+      setQuote((json.data ?? null) as Quote);
     } catch (e: any) {
       setError(e?.message || "Failed to load quotation");
       setQuote(null);
@@ -125,51 +127,64 @@ export default function ConvertQuotationPage() {
     void load();
   }, [id]);
 
-  async function doConvert(issueNow: boolean) {
+  async function acceptQuote() {
     try {
       if (!quote?.id) return;
 
-      if (!quote.customer_id) {
-        setError("This quotation is missing a linked customer and cannot be converted yet.");
-        return;
-      }
-
+      setAccepting(true);
       setError("");
-      issueNow ? setIssuing(true) : setConverting(true);
 
-      const res = await fetch(`/api/quotations/${encodeURIComponent(quote.id)}/convert`, {
-        method: "POST",
+      const res = await fetch(`/api/quotations/${encodeURIComponent(quote.id)}`, {
+        method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          invoice_type: "VAT_INVOICE",
-          invoice_date: invoiceDate,
-          due_date: dueDate || null,
-          issue_now: issueNow,
+          status: "ACCEPTED",
         }),
       });
 
       const json = await res.json().catch(() => null);
 
       if (!res.ok || !json?.ok) {
-        throw new Error(json?.error?.message ?? json?.error ?? "Failed to convert quotation");
+        throw new Error(json?.error ?? "Failed to accept quotation");
       }
 
-      const invoiceId = String(json?.data?.invoice_id ?? "").trim();
-
-      if (!invoiceId) {
-        throw new Error("Invoice created but invoice id missing in response");
-      }
-
-      if (issueNow) {
-        window.open(`/sales/invoices/${encodeURIComponent(invoiceId)}/print`, "_blank", "noopener,noreferrer");
-      }
-
-      router.push(`/sales/invoices/${encodeURIComponent(invoiceId)}`);
+      await load();
     } catch (e: any) {
-      setError(e?.message || "Failed to convert quotation");
+      setError(e?.message || "Failed to accept quotation");
     } finally {
-      setConverting(false);
-      setIssuing(false);
+      setAccepting(false);
+    }
+  }
+
+  async function voidQuote() {
+    try {
+      if (!quote?.id) return;
+
+      const ok = window.confirm("Are you sure you want to void this quotation?");
+      if (!ok) return;
+
+      setVoiding(true);
+      setError("");
+
+      const res = await fetch(`/api/quotations/${encodeURIComponent(quote.id)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          status: "VOID",
+        }),
+      });
+
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.error ?? "Failed to void quotation");
+      }
+
+      await load();
+    } catch (e: any) {
+      setError(e?.message || "Failed to void quotation");
+    } finally {
+      setVoiding(false);
     }
   }
 
@@ -189,7 +204,10 @@ export default function ConvertQuotationPage() {
     );
   }
 
-  const busy = converting || issuing;
+  const status = String(quote.status ?? "DRAFT").toUpperCase();
+  const canAccept = status === "DRAFT";
+  const canConvert = status === "ACCEPTED" && !quote.converted_invoice_id;
+  const alreadyConverted = !!quote.converted_invoice_id;
 
   return (
     <div className="space-y-5">
@@ -199,15 +217,15 @@ export default function ConvertQuotationPage() {
           <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
             <div>
               <Link
-                href={`/sales/quotations/${quote.id}`}
+                href="/sales/quotations"
                 className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-800"
               >
                 <ArrowLeft size={16} />
-                Back to quotation
+                Back to quotations
               </Link>
 
               <h1 className="mt-2 text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl">
-                Convert Quotation to Invoice
+                Quotation Details
               </h1>
 
               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
@@ -215,36 +233,89 @@ export default function ConvertQuotationPage() {
                   <FileText className="size-3.5 text-slate-500" />
                   {quote.quote_no || quote.quotation_no || "—"}
                 </span>
-                <span className="inline-flex items-center gap-2 rounded-full bg-[#ff8a1e]/10 px-3 py-1 font-semibold text-[#c25708] ring-1 ring-[#ff8a1e]/20">
+
+                <span
+                  className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-semibold ring-1 ${statusClasses(status)}`}
+                >
                   <CheckCircle2 className="size-3.5" />
-                  Convert to VAT Invoice
+                  {status}
                 </span>
+
+                {alreadyConverted ? (
+                  <span className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 font-semibold text-blue-700 ring-1 ring-blue-200">
+                    <ArrowUpRight className="size-3.5" />
+                    Converted
+                  </span>
+                ) : null}
               </div>
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button
-                variant="outline"
-                className="rounded-2xl"
-                onClick={() => void doConvert(false)}
-                disabled={busy}
-              >
-                {converting ? <Loader2 className="mr-2 size-4 animate-spin" /> : <FileText className="mr-2 size-4" />}
-                Convert as Draft
-              </Button>
+              <Link href={`/sales/quotations/${encodeURIComponent(quote.id)}/print`}>
+                <Button variant="outline" className="rounded-2xl">
+                  <Printer className="mr-2 size-4" />
+                  Print Quotation
+                </Button>
+              </Link>
 
-              <Button
-                className="rounded-2xl bg-[#071b38] text-white hover:bg-[#06142b]"
-                onClick={() => void doConvert(true)}
-                disabled={busy}
-              >
-                {issuing ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Send className="mr-2 size-4" />}
-                Convert, Issue & Print
-              </Button>
+              {canAccept ? (
+                <Button
+                  className="rounded-2xl bg-emerald-600 text-white hover:bg-emerald-700"
+                  onClick={() => void acceptQuote()}
+                  disabled={accepting}
+                >
+                  {accepting ? (
+                    <Loader2 className="mr-2 size-4 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="mr-2 size-4" />
+                  )}
+                  Accept Quote
+                </Button>
+              ) : null}
+
+              {canConvert ? (
+                <Link href={`/sales/quotations/${encodeURIComponent(quote.id)}/convert`}>
+                  <Button className="rounded-2xl bg-[#071b38] text-white hover:bg-[#06142b]">
+                    <FileText className="mr-2 size-4" />
+                    Convert to Invoice
+                  </Button>
+                </Link>
+              ) : null}
+
+              {alreadyConverted ? (
+                <Link href={`/sales/invoices/${encodeURIComponent(String(quote.converted_invoice_id))}`}>
+                  <Button className="rounded-2xl bg-[#071b38] text-white hover:bg-[#06142b]">
+                    <ArrowUpRight className="mr-2 size-4" />
+                    Open Invoice
+                  </Button>
+                </Link>
+              ) : null}
+
+              {status !== "VOID" ? (
+                <Button
+                  variant="outline"
+                  className="rounded-2xl border-rose-200 text-rose-700 hover:bg-rose-50"
+                  onClick={() => void voidQuote()}
+                  disabled={voiding}
+                >
+                  {voiding ? (
+                    <Loader2 className="mr-2 size-4 animate-spin" />
+                  ) : (
+                    <XCircle className="mr-2 size-4" />
+                  )}
+                  Void Quote
+                </Button>
+              ) : null}
             </div>
           </div>
         </div>
       </div>
+
+      {status === "DRAFT" ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          This document is still a quotation. It will remain a quote until you accept it. Only accepted quotations can be converted to invoice.
+        </div>
+      ) : null}
 
       {error ? (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -263,12 +334,16 @@ export default function ConvertQuotationPage() {
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
                 <div className="text-xs text-slate-500">VAT No.</div>
-                <div className="mt-1 font-semibold text-slate-900">{quote.customer_vat || "—"}</div>
+                <div className="mt-1 font-semibold text-slate-900">
+                  {quote.customer_vat || "—"}
+                </div>
               </div>
 
               <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
                 <div className="text-xs text-slate-500">BRN No.</div>
-                <div className="mt-1 font-semibold text-slate-900">{quote.customer_brn || "—"}</div>
+                <div className="mt-1 font-semibold text-slate-900">
+                  {quote.customer_brn || "—"}
+                </div>
               </div>
 
               <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200 sm:col-span-2">
@@ -289,7 +364,9 @@ export default function ConvertQuotationPage() {
 
           <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-[0_1px_0_rgba(15,23,42,0.05),0_18px_45px_rgba(15,23,42,0.08)]">
             <div className="flex items-center justify-between gap-3">
-              <div className="text-base font-extrabold text-slate-900">Quotation Items</div>
+              <div className="text-base font-extrabold text-slate-900">
+                Quotation Items
+              </div>
               <div className="text-xs font-semibold text-slate-500">
                 {(quote.items ?? []).length} item(s)
               </div>
@@ -312,16 +389,19 @@ export default function ConvertQuotationPage() {
                           {item.description}
                         </div>
                       </div>
-                      <div className="md:col-span-1 md:text-right text-sm text-slate-700">
-                        <span className="md:hidden text-slate-500">Qty: </span>
+
+                      <div className="text-sm text-slate-700 md:col-span-1 md:text-right">
+                        <span className="text-slate-500 md:hidden">Qty: </span>
                         {n2(item.qty)}
                       </div>
-                      <div className="md:col-span-2 md:text-right text-sm text-slate-700">
-                        <span className="md:hidden text-slate-500">Price: </span>
+
+                      <div className="text-sm text-slate-700 md:col-span-2 md:text-right">
+                        <span className="text-slate-500 md:hidden">Price: </span>
                         {money(item.unit_price_excl_vat)}
                       </div>
-                      <div className="md:col-span-2 md:text-right text-sm font-extrabold text-slate-900">
-                        <span className="md:hidden text-slate-500">Total: </span>
+
+                      <div className="text-sm font-extrabold text-slate-900 md:col-span-2 md:text-right">
+                        <span className="text-slate-500 md:hidden">Total: </span>
                         {money(item.line_total)}
                       </div>
                     </div>
@@ -329,50 +409,48 @@ export default function ConvertQuotationPage() {
                 ))}
               </div>
             </div>
+
+            {quote.notes ? (
+              <div className="mt-4 rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
+                <div className="text-xs text-slate-500">Notes</div>
+                <div className="mt-1 whitespace-pre-wrap font-semibold text-slate-900">
+                  {quote.notes}
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
 
         <div className="space-y-4">
           <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-[0_1px_0_rgba(15,23,42,0.05),0_18px_45px_rgba(15,23,42,0.08)]">
-            <div className="text-base font-extrabold text-slate-900">Invoice Setup</div>
+            <div className="text-base font-extrabold text-slate-900">
+              Quotation Summary
+            </div>
 
             <div className="mt-4 space-y-4">
-              <div>
-                <label className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
+                <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                   <Calendar className="size-4 text-slate-400" />
-                  Invoice Date
-                </label>
-                <Input
-                  type="date"
-                  value={invoiceDate}
-                  onChange={(e) => setInvoiceDate(e.target.value)}
-                  className="h-11 rounded-2xl"
-                  disabled={busy}
-                />
-              </div>
-
-              <div>
-                <label className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  <Clock3 className="size-4 text-slate-400" />
-                  Due Date
-                </label>
-                <Input
-                  type="date"
-                  value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
-                  className="h-11 rounded-2xl"
-                  disabled={busy}
-                />
+                  Quotation Date
+                </div>
+                <div className="font-semibold text-slate-900">
+                  {fmtDate(quote.quote_date)}
+                </div>
               </div>
 
               <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                <div className="text-xs text-slate-500">Quotation Date</div>
-                <div className="mt-1 font-semibold text-slate-900">{fmtDate(quote.quote_date)}</div>
+                <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  <Calendar className="size-4 text-slate-400" />
+                  Valid Until
+                </div>
+                <div className="font-semibold text-slate-900">
+                  {fmtDate(quote.valid_until)}
+                </div>
               </div>
 
               <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                <div className="text-xs text-slate-500">Valid Until</div>
-                <div className="mt-1 font-semibold text-slate-900">{fmtDate(quote.valid_until)}</div>
+                <div className="text-xs text-slate-500">Status</div>
+                <div className="mt-1 font-semibold text-slate-900">{status}</div>
               </div>
             </div>
           </div>
@@ -386,16 +464,25 @@ export default function ConvertQuotationPage() {
             <div className="mt-4 space-y-3">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-slate-600">Subtotal</span>
-                <span className="font-semibold text-slate-900">{money(quote.subtotal)}</span>
+                <span className="font-semibold text-slate-900">
+                  {money(quote.subtotal)}
+                </span>
               </div>
+
               <div className="flex items-center justify-between text-sm">
                 <span className="text-slate-600">VAT</span>
-                <span className="font-semibold text-slate-900">{money(quote.vat_amount)}</span>
+                <span className="font-semibold text-slate-900">
+                  {money(quote.vat_amount)}
+                </span>
               </div>
+
               <div className="h-px bg-slate-200" />
+
               <div className="flex items-center justify-between text-lg font-extrabold">
                 <span className="text-slate-900">Total</span>
-                <span className="text-slate-900">{money(quote.total_amount)}</span>
+                <span className="text-slate-900">
+                  {money(quote.total_amount)}
+                </span>
               </div>
             </div>
           </div>

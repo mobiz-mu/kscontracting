@@ -185,6 +185,7 @@ export default function InvoiceKSDoc({
                 src={data.company.logoSrc}
                 alt={`${data.company.name} logo`}
                 fill
+                sizes="242px"
                 className="object-contain object-left-top"
                 priority
               />
@@ -329,6 +330,7 @@ export default function InvoiceKSDoc({
                   src={data.company.stampSrc}
                   alt="KS stamp"
                   fill
+                  sizes="113px"
                   className="object-contain"
                 />
               </div>
@@ -344,6 +346,7 @@ export default function InvoiceKSDoc({
                   src={data.company.signatureSrc}
                   alt="Authorised signature"
                   fill
+                  sizes="302px"
                   className="object-contain"
                 />
               </div>

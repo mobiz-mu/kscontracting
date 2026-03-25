@@ -106,7 +106,6 @@ export async function POST(req: Request, ctx: RouteContext) {
     const body = await req.json().catch(() => ({}));
 
     const invoiceType = normalizeInvoiceType(body.invoice_type ?? "VAT_INVOICE");
-    const issueNow = body.issue_now === true;
 
     const requestedInvoiceNo =
       typeof body.invoice_no === "string" ? body.invoice_no.trim() : "";
@@ -169,6 +168,12 @@ export async function POST(req: Request, ctx: RouteContext) {
       });
     }
 
+    if (String(quote.status ?? "").toUpperCase() !== "ACCEPTED") {
+      return jsonError(400, {
+        error: "Only accepted quotations can be converted to invoice",
+      });
+    }
+
     if (!quote.customer_id || !Number.isFinite(Number(quote.customer_id))) {
       return jsonError(400, {
         error: "Quotation must have a valid linked customer_id before conversion",
@@ -202,8 +207,6 @@ export async function POST(req: Request, ctx: RouteContext) {
       return jsonError(400, { error: "Quotation has no items to convert" });
     }
 
-    const vatRate = n2(quote.vat_rate || 0.15) || 0.15;
-
     const invoiceDate = requestedInvoiceDate || quote.quote_date;
     const dueDate = requestedDueDate || quote.valid_until || null;
 
@@ -211,7 +214,6 @@ export async function POST(req: Request, ctx: RouteContext) {
       return jsonError(400, { error: "invoice_date is required for conversion" });
     }
 
-    // Always create as DRAFT first because invoice_items triggers only allow DRAFT
     let invoiceNo = requestedInvoiceNo;
     if (!invoiceNo) {
       invoiceNo = await generateNextInvoiceNo(admin, invoiceType);
@@ -277,7 +279,7 @@ export async function POST(req: Request, ctx: RouteContext) {
       description: String(item.description ?? "").trim(),
       qty: n2(item.qty),
       unit_price_excl_vat: n2(item.unit_price_excl_vat),
-      vat_rate: n2(item.vat_rate || vatRate) || vatRate,
+      vat_rate: n2(item.vat_rate || quote.vat_rate || 0.15) || 0.15,
       vat_amount: n2(item.vat_amount),
       line_total: n2(item.line_total),
     }));
@@ -313,59 +315,13 @@ export async function POST(req: Request, ctx: RouteContext) {
       });
     }
 
-    let finalInvoice = invoice;
-
-    if (issueNow) {
-      const { data: issuedInvoice, error: issueErr } = await admin
-        .from("invoices")
-        .update({
-          status: "ISSUED",
-          issued_at: new Date().toISOString(),
-        })
-        .eq("id", invoice.id)
-        .eq("created_by", userRes.user.id)
-        .select(`
-          id,
-          invoice_no,
-          customer_id,
-          customer_name,
-          customer_vat,
-          customer_brn,
-          customer_address,
-          invoice_type,
-          invoice_date,
-          due_date,
-          site_address,
-          status,
-          notes,
-          subtotal,
-          vat_amount,
-          total_amount,
-          paid_amount,
-          balance_amount,
-          created_at,
-          issued_at
-        `)
-        .single();
-
-      if (issueErr) {
-        return jsonError(500, {
-          error: "Invoice created but failed to issue after conversion",
-          invoice_id: invoice.id,
-          supabaseError: safeError(issueErr),
-        });
-      }
-
-      finalInvoice = issuedInvoice;
-    }
-
     return NextResponse.json({
       ok: true,
       data: {
         quotation_id: quotationId,
-        invoice_id: finalInvoice.id,
-        invoice_no: finalInvoice.invoice_no,
-        invoice: finalInvoice,
+        invoice_id: invoice.id,
+        invoice_no: invoice.invoice_no,
+        invoice,
       },
     });
   } catch (e: any) {

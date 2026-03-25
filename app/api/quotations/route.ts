@@ -30,10 +30,8 @@ function round2(n: number) {
 
 function normalizeStatus(v: any) {
   const s = String(v ?? "").trim().toUpperCase();
-  if (s === "SENT") return "SENT";
   if (s === "ACCEPTED") return "ACCEPTED";
-  if (s === "EXPIRED") return "EXPIRED";
-  if (s === "ALL") return "ALL";
+  if (s === "VOID") return "VOID";
   return "DRAFT";
 }
 
@@ -102,7 +100,7 @@ export async function POST(req: Request) {
       });
     }
 
-    const status = normalizeStatus(body.status);
+    const status = quotationId ? normalizeStatus(body.status) : "DRAFT";
     const vatRate = 0.15;
 
     const items = Array.isArray(body.items) ? body.items : [];
@@ -136,14 +134,14 @@ export async function POST(req: Request) {
     const vatAmount = round2(subtotal * vatRate);
     const totalAmount = round2(subtotal + vatAmount);
 
-     const incomingQuoteNo =
+    const incomingQuoteNo =
       typeof body.quote_no === "string" ? body.quote_no.trim() : "";
 
-     const incomingQuotationNo =
+    const incomingQuotationNo =
       typeof body.quotation_no === "string" ? body.quotation_no.trim() : "";
 
-     const resolvedQuoteNo = incomingQuoteNo || incomingQuotationNo || null;
-     const resolvedQuotationNo = incomingQuotationNo || incomingQuoteNo || null;
+    const resolvedQuoteNo = incomingQuoteNo || incomingQuotationNo || null;
+    const resolvedQuotationNo = incomingQuotationNo || incomingQuoteNo || null;
 
     const quotationPayload = {
       quote_no: resolvedQuoteNo,
@@ -162,7 +160,7 @@ export async function POST(req: Request) {
       total_amount: totalAmount,
       vat_rate: vatRate,
       status,
-   };
+    };
 
     let savedQuote: any = null;
 
@@ -191,7 +189,8 @@ export async function POST(req: Request) {
           total_amount,
           vat_rate,
           site_address,
-          created_at
+          created_at,
+          converted_invoice_id
         `)
         .single();
 
@@ -227,7 +226,8 @@ export async function POST(req: Request) {
           total_amount,
           vat_rate,
           site_address,
-          created_at
+          created_at,
+          converted_invoice_id
         `)
         .single();
 
@@ -324,7 +324,7 @@ export async function GET(req: Request) {
 
     const { searchParams } = new URL(req.url);
     const q = (searchParams.get("q") ?? "").trim();
-    const status = normalizeStatus(searchParams.get("status") ?? "ALL");
+    const rawStatus = String(searchParams.get("status") ?? "ALL").trim().toUpperCase();
 
     const page = Math.max(1, Number(searchParams.get("page") ?? 1) || 1);
     const pageSize = Math.min(200, Math.max(10, Number(searchParams.get("pageSize") ?? 25) || 25));
@@ -351,7 +351,8 @@ export async function GET(req: Request) {
         total_amount,
         vat_rate,
         site_address,
-        created_at
+        created_at,
+        converted_invoice_id
       `)
       .eq("created_by", userRes.user.id)
       .order("created_at", { ascending: false });
@@ -380,17 +381,16 @@ export async function GET(req: Request) {
       });
     }
 
-    if (status !== "ALL") {
+    if (rawStatus !== "ALL") {
       filtered = filtered.filter(
-        (r: any) => String(r.status ?? "").toUpperCase() === status
+        (r: any) => String(r.status ?? "").toUpperCase() === rawStatus
       );
     }
 
     const byStatus: Record<string, number> = {
       DRAFT: 0,
-      SENT: 0,
       ACCEPTED: 0,
-      EXPIRED: 0,
+      VOID: 0,
     };
 
     for (const r of filtered) {
@@ -418,9 +418,9 @@ export async function GET(req: Request) {
       kpi: {
         totalQuotes,
         totalValue,
-        pendingCount: (byStatus.DRAFT ?? 0) + (byStatus.SENT ?? 0),
+        pendingCount: byStatus.DRAFT ?? 0,
         acceptedCount: byStatus.ACCEPTED ?? 0,
-        expiredCount: byStatus.EXPIRED ?? 0,
+        voidCount: byStatus.VOID ?? 0,
         byStatus,
       },
     });

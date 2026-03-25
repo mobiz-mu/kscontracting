@@ -25,6 +25,13 @@ function isUuid(v: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 }
 
+function normalizeStatus(v: any) {
+  const s = String(v ?? "").trim().toUpperCase();
+  if (s === "ACCEPTED") return "ACCEPTED";
+  if (s === "VOID") return "VOID";
+  return "DRAFT";
+}
+
 export async function GET(_request: NextRequest, { params }: Ctx) {
   try {
     const { id } = await params;
@@ -179,7 +186,6 @@ export async function GET(_request: NextRequest, { params }: Ctx) {
             vat_amount: Number(item.vat_amount ?? 0),
             line_total: Number(item.line_total ?? 0),
 
-            // extra aliases so old UI pages still work
             price: Number(item.unit_price_excl_vat ?? 0),
             total: Number(item.line_total ?? 0),
           })) ?? [],
@@ -188,5 +194,117 @@ export async function GET(_request: NextRequest, { params }: Ctx) {
   } catch (e: any) {
     console.error("[GET /api/quotations/[id]] fatal", e);
     return jsonError(500, { error: e?.message ?? "Internal error" });
+  }
+}
+
+export async function PATCH(request: NextRequest, { params }: Ctx) {
+  try {
+    const { id } = await params;
+    const safeId = String(id ?? "").trim();
+
+    if (!safeId) {
+      return jsonError(400, { error: "Missing quotation id" });
+    }
+
+    if (!isUuid(safeId)) {
+      return jsonError(400, { error: "Invalid quotation id" });
+    }
+
+    const supabase = await createSupabaseServerClient();
+    const { data: userRes, error: userErr } = await supabase.auth.getUser();
+
+    if (userErr || !userRes.user) {
+      return jsonError(401, {
+        error: "Unauthorized",
+        supabaseError: safeError(userErr),
+      });
+    }
+
+    const admin = createSupabaseAdminClient();
+    const body = await request.json().catch(() => ({}));
+
+    const { data: existing, error: existingErr } = await admin
+      .from("quotations")
+      .select(`
+        id,
+        status,
+        created_by,
+        converted_invoice_id
+      `)
+      .eq("id", safeId)
+      .maybeSingle();
+
+    if (existingErr) {
+      return jsonError(500, {
+        error: "Failed to load quotation",
+        supabaseError: safeError(existingErr),
+      });
+    }
+
+    if (!existing) {
+      return jsonError(404, { error: "Quotation not found" });
+    }
+
+    if (String(existing.created_by) !== String(userRes.user.id)) {
+      return jsonError(403, { error: "Forbidden" });
+    }
+
+    const nextStatus = normalizeStatus(body.status);
+
+    if (existing.converted_invoice_id && nextStatus !== "VOID") {
+      return jsonError(400, {
+        error: "Converted quotations cannot be changed except voiding if your business allows it",
+      });
+    }
+
+    const payload: Record<string, any> = {
+      status: nextStatus,
+    };
+
+    const { data: updated, error: updateErr } = await admin
+      .from("quotations")
+      .update(payload)
+      .eq("id", safeId)
+      .eq("created_by", userRes.user.id)
+      .select(`
+        id,
+        quote_no,
+        quotation_no,
+        customer_id,
+        customer_name,
+        customer_vat,
+        customer_brn,
+        customer_address,
+        quote_date,
+        valid_until,
+        status,
+        notes,
+        subtotal,
+        vat_amount,
+        total_amount,
+        vat_rate,
+        site_address,
+        created_at,
+        updated_at,
+        converted_invoice_id
+      `)
+      .single();
+
+    if (updateErr) {
+      return jsonError(500, {
+        error: "Failed to update quotation",
+        supabaseError: safeError(updateErr),
+      });
+    }
+
+    return NextResponse.json({
+      ok: true,
+      data: updated,
+    });
+  } catch (e: any) {
+    console.error("[PATCH /api/quotations/[id]] fatal", e);
+    return jsonError(500, {
+      error: e?.message ?? "Internal error",
+    });
   }
 }

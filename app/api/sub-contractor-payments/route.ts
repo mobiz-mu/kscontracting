@@ -109,7 +109,9 @@ export async function POST(req: Request) {
     const supabaseAdmin = createSupabaseAdminClient();
     const body = await req.json().catch(() => ({}));
 
-    const paymentNo = String(body.payment_no ?? "").trim();
+    const paymentNo =
+      typeof body.payment_no === "string" ? body.payment_no.trim() || null : null;
+
     const subContractorId = Number(body.sub_contractor_id ?? 0);
     const purchaseBillId = body.purchase_bill_id ? Number(body.purchase_bill_id) : null;
     const paymentDate = String(body.payment_date ?? "").trim();
@@ -117,10 +119,6 @@ export async function POST(req: Request) {
     const referenceNo = String(body.reference_no ?? "").trim() || null;
     const amount = n2(body.amount);
     const notes = String(body.notes ?? "").trim() || null;
-
-    if (!paymentNo) {
-      return jsonError(400, { error: "payment_no is required" });
-    }
 
     if (!subContractorId) {
       return jsonError(400, { error: "sub_contractor_id is required" });

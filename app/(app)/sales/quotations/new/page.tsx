@@ -15,7 +15,7 @@ import {
   Hash,
   PencilLine,
   ListChecks,
-  ChevronDown,
+  Lock,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -94,7 +94,13 @@ async function safeGet<T>(url: string): Promise<T> {
   return JSON.parse(text) as T;
 }
 
-function Card3D({ children, className }: { children: React.ReactNode; className?: string }) {
+function Card3D({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
     <div
       className={cn(
@@ -248,25 +254,25 @@ export default function NewQuotationPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-         quote_no: quotationNo,
-         quotation_no: quotationNo,
-         customer_id: customerMode === "LIST" && customerId ? Number(customerId) : null,
-         customer_name: customerName || null,
-         customer_vat: customerVat || null,
-         customer_brn: customerBrn || null,
-         customer_address: customerAddress || null,
-         quote_date: quoteDate,
-         site_address: siteAddress || null,
-         vat_rate: 0.15,
-         notes,
-         items: items
-           .map((i) => ({
-            description: String(i.description ?? "").trim(),
-             qty: n2(i.qty),
-             price: n2(i.price),
-        }))
-         .filter((i) => i.description),
-       }),
+          quote_no: quotationNo,
+          quotation_no: quotationNo,
+          customer_id: customerMode === "LIST" && customerId ? Number(customerId) : null,
+          customer_name: customerName || null,
+          customer_vat: customerVat || null,
+          customer_brn: customerBrn || null,
+          customer_address: customerAddress || null,
+          quote_date: quoteDate,
+          site_address: siteAddress || null,
+          valid_until: null,
+          notes,
+          items: items
+            .map((i) => ({
+              description: String(i.description ?? "").trim(),
+              qty: n2(i.qty),
+              price: n2(i.price),
+            }))
+            .filter((i) => i.description),
+        }),
       });
 
       const json = await res.json();
@@ -398,15 +404,22 @@ export default function NewQuotationPage() {
               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
                 <span className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-3 py-1 font-semibold ring-1 ring-slate-200">
                   <FileText className="size-3.5 text-slate-500" />
-                  KS QUOTATION
+                  QUOTATION ONLY
                 </span>
+
                 <span className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-3 py-1 font-semibold ring-1 ring-slate-200">
                   <Hash className="size-3.5 text-slate-500" />
                   {quotationNo || "—"}
                 </span>
+
                 <span className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-3 py-1 font-semibold ring-1 ring-slate-200">
                   <Percent className="size-3.5 text-slate-500" />
                   VAT 15%
+                </span>
+
+                <span className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 font-semibold text-amber-800 ring-1 ring-amber-200">
+                  <Lock className="size-3.5" />
+                  Starts as DRAFT
                 </span>
               </div>
             </div>
@@ -417,7 +430,7 @@ export default function NewQuotationPage() {
               className="h-11 rounded-2xl bg-[#071b38] hover:bg-[#06142b]"
             >
               <Save className="mr-2 h-4 w-4" />
-              Save quotation
+              Save Quote
             </Button>
           </div>
         </div>
@@ -427,7 +440,7 @@ export default function NewQuotationPage() {
         <div>
           <div className="text-sm font-semibold text-slate-900">Quotation Details</div>
           <div className="mt-0.5 text-sm text-slate-600">
-            KS quotation flow with fixed VAT 15%, customer selection, and manual entry option.
+            Create a quotation only. It will remain a quote until accepted, then it can be converted to invoice.
           </div>
         </div>
 
@@ -439,8 +452,8 @@ export default function NewQuotationPage() {
             </label>
             <Input
               value={quotationNo}
-              onChange={(e) => setQuotationNo(e.target.value)}
-              className="h-11 rounded-2xl"
+              readOnly
+              className="h-11 rounded-2xl bg-slate-50 text-slate-700"
             />
           </div>
 
@@ -639,7 +652,7 @@ export default function NewQuotationPage() {
           <div>
             <div className="text-sm font-semibold text-slate-900">Quotation Items</div>
             <div className="mt-0.5 text-sm text-slate-600">
-              Bigger description field for KS work details, with empty numeric fields until you type.
+              Add quote lines only. This document remains a quotation until accepted.
             </div>
           </div>
 

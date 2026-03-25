@@ -793,9 +793,8 @@ export default function DashboardClient() {
             </div>
           </div>
 
-          <div className="mt-3 h-[210px] sm:h-[230px] lg:h-[245px] xl:h-[230px] 2xl:h-[250px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={series} margin={{ top: 10, right: 8, left: -18, bottom: 0 }}>
+          <div className="mt-3 min-w-0 h-[210px] sm:h-[230px] lg:h-[245px] xl:h-[230px] 2xl:h-[250px]">
+           <ResponsiveContainer width="100%" height={250}>                                                                                              <AreaChart data={series} margin={{ top: 10, right: 8, left: -18, bottom: 0 }}>
                 <defs>
                   <linearGradient id="dashboardRevenue" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#071b38" stopOpacity={0.22} />
@@ -920,8 +919,8 @@ export default function DashboardClient() {
                 </div>
               </div>
 
-              <div className="h-[190px] sm:h-[210px]">
-                <ResponsiveContainer width="100%" height="100%">
+             <div className="min-w-0 h-[190px] sm:h-[210px]">
+                <ResponsiveContainer width="100%" height={210}>  
                   <BarChart
                     data={series}
                     margin={{ top: 8, right: 6, left: -16, bottom: 0 }}
@@ -974,8 +973,8 @@ export default function DashboardClient() {
               </div>
             </div>
 
-            <div className="mt-3 h-[200px]">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="mt-3 min-w-0 h-[200px]">
+              <ResponsiveContainer width="100%" height={200}>
                 <PieChart>
                   <Tooltip content={<PremiumTooltip />} />
                   <Pie
@@ -1117,8 +1116,8 @@ export default function DashboardClient() {
           </div>
 
           <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-[220px_1fr]">
-            <div className="h-[220px]">
-              <ResponsiveContainer width="100%" height="100%">
+           <div className="min-w-0 h-[220px]">
+              <ResponsiveContainer width="100%" height={220}>
                 <PieChart>
                   <Tooltip content={<PremiumTooltip />} />
                   <Pie
@@ -1192,8 +1191,8 @@ export default function DashboardClient() {
             </div>
           </div>
 
-          <div className="mt-3 h-[200px] sm:h-[220px]">
-            <ResponsiveContainer width="100%" height="100%">
+         <div className="mt-3 min-w-0 h-[200px] sm:h-[220px]">
+            <ResponsiveContainer width="100%" height={220}>
               <BarChart data={series} margin={{ top: 10, right: 0, left: -18, bottom: 0 }} barCategoryGap={14}>
                 <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#e2e8f0" />
                 <XAxis
