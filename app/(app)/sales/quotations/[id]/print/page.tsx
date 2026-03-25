@@ -1,7 +1,11 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
+import { ArrowLeft, Printer, RefreshCw, FileText } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
 import InvoiceKSDoc, {
   type KSInvoiceDocData,
   type KSInvoiceItem,
@@ -91,14 +95,61 @@ export default function PrintQuotationPage() {
   }, [id]);
 
   React.useEffect(() => {
-    if (!quote || loading) return;
+    const style = document.createElement("style");
+    style.setAttribute("data-ks-print", "quotation-print");
+    style.innerHTML = `
+      @page {
+        size: A4 portrait;
+        margin: 8mm;
+      }
 
-    const t = window.setTimeout(() => {
-      window.print();
-    }, 450);
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: #eef2f7;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
 
-    return () => window.clearTimeout(t);
-  }, [quote, loading]);
+      @media print {
+        html, body {
+          margin: 0 !important;
+          padding: 0 !important;
+          background: #ffffff !important;
+          overflow: visible !important;
+        }
+
+        body * {
+          visibility: hidden !important;
+        }
+
+        #ks-print-root,
+        #ks-print-root * {
+          visibility: visible !important;
+        }
+
+        #ks-print-root {
+          position: absolute !important;
+          left: 0 !important;
+          top: 0 !important;
+          width: 194mm !important;
+          max-width: 194mm !important;
+          margin: 0 auto !important;
+          padding: 0 !important;
+          background: #ffffff !important;
+          overflow: visible !important;
+          break-inside: avoid !important;
+          page-break-inside: avoid !important;
+        }
+
+        .print\\:hidden {
+          display: none !important;
+        }
+      }
+    `;
+    document.head.appendChild(style);
+    return () => style.remove();
+  }, []);
 
   const docData = React.useMemo<KSInvoiceDocData | null>(() => {
     if (!quote) return null;
@@ -173,6 +224,16 @@ export default function PrintQuotationPage() {
     };
   }, [quote]);
 
+  React.useEffect(() => {
+    if (!docData || loading) return;
+
+    const t = window.setTimeout(() => {
+      window.print();
+    }, 450);
+
+    return () => window.clearTimeout(t);
+  }, [docData, loading]);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-100 p-8 text-sm text-slate-600 print:bg-white print:p-0">
@@ -190,37 +251,36 @@ export default function PrintQuotationPage() {
   }
 
   return (
-    <>
-      <style jsx global>{`
-        @media print {
-          html,
-          body {
-            background: #ffffff !important;
-          }
+    <div className="min-h-screen bg-slate-100 p-3 print:bg-white print:p-0 sm:p-6">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2 print:hidden">
+        <div className="flex items-center gap-2 text-sm text-slate-600">
+          <FileText className="size-4" />
+          Quotation Print View
+        </div>
 
-          body * {
-            visibility: hidden !important;
-          }
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href={`/sales/quotations/${encodeURIComponent(id)}`}>
+            <Button variant="outline">
+              <ArrowLeft className="mr-2 size-4" />
+              Back
+            </Button>
+          </Link>
 
-          #ks-print-root,
-          #ks-print-root * {
-            visibility: visible !important;
-          }
+          <Button variant="outline" onClick={() => void load()}>
+            <RefreshCw className="mr-2 size-4" />
+            Refresh
+          </Button>
 
-          #ks-print-root {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 100% !important;
-          }
-        }
-      `}</style>
-
-      <div className="min-h-screen bg-slate-100 p-3 print:bg-white print:p-0 sm:p-6">
-        <div id="ks-print-root">
-          <InvoiceKSDoc data={docData} variant="quotation" />
+          <Button onClick={() => window.print()}>
+            <Printer className="mr-2 size-4" />
+            Print / Save PDF
+          </Button>
         </div>
       </div>
-    </>
+
+      <div id="ks-print-root" className="mx-auto w-[194mm] bg-white">
+        <InvoiceKSDoc data={docData} variant="quotation" />
+      </div>
+    </div>
   );
 }

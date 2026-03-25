@@ -136,13 +136,18 @@ export async function POST(req: Request) {
     const vatAmount = round2(subtotal * vatRate);
     const totalAmount = round2(subtotal + vatAmount);
 
-    const quote_no = typeof body.quote_no === "string" ? body.quote_no.trim() || null : null;
-    const quotation_no =
-      typeof body.quotation_no === "string" ? body.quotation_no.trim() || null : null;
+     const incomingQuoteNo =
+      typeof body.quote_no === "string" ? body.quote_no.trim() : "";
+
+     const incomingQuotationNo =
+      typeof body.quotation_no === "string" ? body.quotation_no.trim() : "";
+
+     const resolvedQuoteNo = incomingQuoteNo || incomingQuotationNo || null;
+     const resolvedQuotationNo = incomingQuotationNo || incomingQuoteNo || null;
 
     const quotationPayload = {
-      quote_no,
-      quotation_no,
+      quote_no: resolvedQuoteNo,
+      quotation_no: resolvedQuotationNo,
       customer_id: hasCustomerId ? customerIdNum : null,
       customer_name,
       customer_vat,
@@ -157,7 +162,7 @@ export async function POST(req: Request) {
       total_amount: totalAmount,
       vat_rate: vatRate,
       status,
-    };
+   };
 
     let savedQuote: any = null;
 

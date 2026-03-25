@@ -21,6 +21,7 @@ type Customer = {
   email: string | null;
   phone: string | null;
   vat_no: string | null;
+  brn: string | null;
   created_at: string | null;
 };
 
@@ -62,31 +63,31 @@ export default function CustomersPage() {
       params.set("page", String(page));
       params.set("pageSize", String(pageSize));
 
-      const res = await fetch(`/api/customers?${params}`);
+      const res = await fetch(`/api/customers?${params}`, {
+        cache: "no-store",
+      });
 
       const json: APIResponse = await res.json();
 
-      if (!res.ok) throw new Error("Failed to load customers");
+      if (!res.ok) {
+        throw new Error("Failed to load customers");
+      }
 
       setRows(json.data ?? []);
     } catch (e: any) {
-      setError(e.message);
+      setError(e.message || "Failed to load customers");
     } finally {
       setLoading(false);
     }
   }
 
   React.useEffect(() => {
-    load();
+    void load();
   }, [page]);
 
   return (
     <div className="space-y-6">
-
-      {/* Header */}
-
       <div className="flex items-center justify-between">
-
         <div className="flex items-center gap-3">
           <Users className="h-7 w-7 text-slate-600" />
           <h1 className="text-2xl font-bold">Customers</h1>
@@ -98,14 +99,10 @@ export default function CustomersPage() {
             New Customer
           </Button>
         </Link>
-
       </div>
 
-      {/* Search */}
-
       <div className="flex gap-2">
-
-        <div className="relative w-full max-w-[380px]">
+        <div className="relative w-full max-w-[420px]">
           <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
 
           <Input
@@ -113,91 +110,72 @@ export default function CustomersPage() {
             className="pl-9"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                setPage(1);
+                void load();
+              }
+            }}
           />
         </div>
 
         <Button
           variant="outline"
-          onClick={load}
+          onClick={() => {
+            setPage(1);
+            void load();
+          }}
         >
-          <RefreshCw className="h-4 w-4 mr-2" />
+          <RefreshCw className="mr-2 h-4 w-4" />
           Refresh
         </Button>
-
       </div>
 
-      {error && (
-        <div className="text-red-500 text-sm">{error}</div>
-      )}
+      {error ? <div className="text-sm text-red-500">{error}</div> : null}
 
-      {/* Table */}
-
-      <div className="bg-white border rounded-xl overflow-hidden">
-
+      <div className="overflow-hidden rounded-xl border bg-white">
         <table className="w-full text-sm">
-
           <thead className="bg-slate-50 text-slate-600">
-
             <tr>
-              <th className="text-left p-3">Customer</th>
-              <th className="text-left p-3">Email</th>
-              <th className="text-left p-3">Phone</th>
-              <th className="text-left p-3">VAT</th>
-              <th className="text-left p-3">Created</th>
-              <th className="text-right p-3"></th>
+              <th className="p-3 text-left">Customer</th>
+              <th className="p-3 text-left">Email</th>
+              <th className="p-3 text-left">Phone</th>
+              <th className="p-3 text-left">VAT</th>
+              <th className="p-3 text-left">BRN</th>
+              <th className="p-3 text-left">Created</th>
+              <th className="p-3 text-right"></th>
             </tr>
-
           </thead>
 
           <tbody>
-
             {loading ? (
               <tr>
-                <td
-                  colSpan={6}
-                  className="p-6 text-center text-slate-500"
-                >
+                <td colSpan={7} className="p-6 text-center text-slate-500">
                   Loading customers...
                 </td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td
-                  colSpan={6}
-                  className="p-6 text-center text-slate-500"
-                >
+                <td colSpan={7} className="p-6 text-center text-slate-500">
                   No customers found
                 </td>
               </tr>
             ) : (
               rows.map((c) => (
-                <tr
-                  key={c.id}
-                  className="border-t hover:bg-slate-50"
-                >
+                <tr key={c.id} className="border-t hover:bg-slate-50">
+                  <td className="p-3 font-semibold">{c.name}</td>
 
-                  <td className="p-3 font-semibold">
-                    {c.name}
-                  </td>
+                  <td className="p-3">{c.email ?? "—"}</td>
 
-                  <td className="p-3">
-                    {c.email ?? "—"}
-                  </td>
+                  <td className="p-3">{c.phone ?? "—"}</td>
 
-                  <td className="p-3">
-                    {c.phone ?? "—"}
-                  </td>
+                  <td className="p-3">{c.vat_no ?? "—"}</td>
 
-                  <td className="p-3">
-                    {c.vat_no ?? "—"}
-                  </td>
+                  <td className="p-3">{c.brn ?? "—"}</td>
 
-                  <td className="p-3">
-                    {fmtDate(c.created_at)}
-                  </td>
+                  <td className="p-3">{fmtDate(c.created_at)}</td>
 
                   <td className="p-3 text-right">
-
                     <Link
                       href={`/contacts/customers/${c.id}`}
                       className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline"
@@ -205,23 +183,15 @@ export default function CustomersPage() {
                       Open
                       <ArrowUpRight className="h-4 w-4" />
                     </Link>
-
                   </td>
-
                 </tr>
               ))
             )}
-
           </tbody>
-
         </table>
-
       </div>
 
-      {/* Pagination */}
-
       <div className="flex justify-end gap-2">
-
         <Button
           variant="outline"
           onClick={() => setPage((p) => Math.max(1, p - 1))}
@@ -230,16 +200,11 @@ export default function CustomersPage() {
           Prev
         </Button>
 
-        <Button
-          variant="outline"
-          onClick={() => setPage((p) => p + 1)}
-        >
+        <Button variant="outline" onClick={() => setPage((p) => p + 1)}>
           Next
           <ChevronRight className="ml-1 h-4 w-4" />
         </Button>
-
       </div>
-
     </div>
   );
 }

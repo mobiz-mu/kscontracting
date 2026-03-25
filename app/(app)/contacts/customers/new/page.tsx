@@ -15,6 +15,7 @@ export default function NewCustomerPage() {
   const [email, setEmail] = React.useState("");
   const [phone, setPhone] = React.useState("");
   const [vatNo, setVatNo] = React.useState("");
+  const [brn, setBrn] = React.useState("");
   const [address, setAddress] = React.useState("");
 
   const [loading, setLoading] = React.useState(false);
@@ -34,11 +35,12 @@ export default function NewCustomerPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          name,
-          email,
-          phone,
-          vat_no: vatNo,
-          address,
+          name: name.trim(),
+          email: email.trim() || null,
+          phone: phone.trim() || null,
+          vat_no: vatNo.trim() || null,
+          brn: brn.trim() || null,
+          address: address.trim() || null,
         }),
       });
 
@@ -50,7 +52,7 @@ export default function NewCustomerPage() {
 
       router.push(`/contacts/customers/${json.data.id}`);
     } catch (e: any) {
-      alert(e.message);
+      alert(e.message || "Failed to create customer");
     } finally {
       setLoading(false);
     }
@@ -58,11 +60,7 @@ export default function NewCustomerPage() {
 
   return (
     <div className="max-w-[720px] space-y-6">
-
-      {/* Header */}
-
       <div>
-
         <Link
           href="/contacts/customers"
           className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-800"
@@ -71,23 +69,12 @@ export default function NewCustomerPage() {
           Back to customers
         </Link>
 
-        <h1 className="mt-2 text-2xl font-bold">
-          New Customer
-        </h1>
-
+        <h1 className="mt-2 text-2xl font-bold">New Customer</h1>
       </div>
 
-      {/* Form */}
-
-      <div className="bg-white border rounded-xl p-6 space-y-5">
-
-        {/* Name */}
-
+      <div className="space-y-5 rounded-xl border bg-white p-6">
         <div>
-          <label className="text-sm text-slate-600">
-            Customer name *
-          </label>
-
+          <label className="text-sm text-slate-600">Customer name *</label>
           <Input
             placeholder="Customer name"
             value={name}
@@ -95,13 +82,8 @@ export default function NewCustomerPage() {
           />
         </div>
 
-        {/* Email */}
-
         <div>
-          <label className="text-sm text-slate-600">
-            Email
-          </label>
-
+          <label className="text-sm text-slate-600">Email</label>
           <Input
             placeholder="email@example.com"
             value={email}
@@ -109,13 +91,8 @@ export default function NewCustomerPage() {
           />
         </div>
 
-        {/* Phone */}
-
         <div>
-          <label className="text-sm text-slate-600">
-            Phone
-          </label>
-
+          <label className="text-sm text-slate-600">Phone</label>
           <Input
             placeholder="+230 58000000"
             value={phone}
@@ -123,13 +100,8 @@ export default function NewCustomerPage() {
           />
         </div>
 
-        {/* VAT */}
-
         <div>
-          <label className="text-sm text-slate-600">
-            VAT Number
-          </label>
-
+          <label className="text-sm text-slate-600">VAT Number</label>
           <Input
             placeholder="VAT123456"
             value={vatNo}
@@ -137,13 +109,17 @@ export default function NewCustomerPage() {
           />
         </div>
 
-        {/* Address */}
+        <div>
+          <label className="text-sm text-slate-600">BRN</label>
+          <Input
+            placeholder="C12345678"
+            value={brn}
+            onChange={(e) => setBrn(e.target.value)}
+          />
+        </div>
 
         <div>
-          <label className="text-sm text-slate-600">
-            Address
-          </label>
-
+          <label className="text-sm text-slate-600">Address</label>
           <Input
             placeholder="Customer address"
             value={address}
@@ -151,10 +127,7 @@ export default function NewCustomerPage() {
           />
         </div>
 
-        {/* Save */}
-
         <div className="flex justify-end pt-2">
-
           <Button
             onClick={createCustomer}
             disabled={loading}
@@ -163,11 +136,8 @@ export default function NewCustomerPage() {
             <Save className="mr-2 h-4 w-4" />
             Save Customer
           </Button>
-
         </div>
-
       </div>
-
     </div>
   );
 }

@@ -3,7 +3,7 @@
 import * as React from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   FileText,
@@ -25,7 +25,10 @@ import {
   BadgeDollarSign,
   CircleDollarSign,
   Sparkles,
-  ChevronsUpDown,
+  ChevronDown,
+  HardHat,
+  FileSpreadsheet,
+  WalletCards,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -68,6 +71,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Invoices",
     icon: FileText,
     permissions: ["invoices.view"],
+    href: "/sales/invoices",
     children: [
       {
         label: "Create Invoice",
@@ -99,6 +103,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Quotations",
     icon: Receipt,
     permissions: ["quotations.view"],
+    href: "/sales/quotations",
     children: [
       {
         label: "New Quote",
@@ -118,6 +123,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Credit Notes",
     icon: CircleDollarSign,
     permissions: ["credit_notes.view"],
+    href: "/sales/credit-notes",
     children: [
       {
         label: "Create Credit Note",
@@ -128,35 +134,80 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: "Contract",
+    label: "Contact",
     icon: FolderKanban,
     permissions: ["contacts.manage"],
+    href: "/contacts",
     children: [
       {
+        label: "Customers",
+        href: "/contacts/customers",
+        icon: Users,
+        permissions: ["contacts.manage"],
+      },
+      {
         label: "New Customer",
-        href: "/contacts?tab=customers",
+        href: "/contacts/customers/new",
         icon: UserPlus,
         permissions: ["contacts.manage"],
       },
       {
-        label: "New Supplier",
-        href: "/contacts?tab=suppliers",
+        label: "Suppliers",
+        href: "/contacts/suppliers",
         icon: Truck,
         permissions: ["contacts.manage"],
       },
+      {
+        label: "New Supplier",
+        href: "/contacts/suppliers/new",
+        icon: Truck,
+        permissions: ["contacts.manage"],
+      },
+      {
+        label: "Sub Contractors",
+        href: "/contacts/sub-contractors",
+        icon: HardHat,
+        permissions: ["contacts.manage"],
+      },
+      {
+        label: "New Sub Contractor",
+        href: "/contacts/sub-contractors/new",
+        icon: UserPlus,
+        permissions: ["contacts.manage"],
+      },
     ],
+  },
+  {
+    label: "Purchase Bills",
+    icon: FileSpreadsheet,
+    permissions: ["contacts.manage"],
+    href: "/purchase-bills",
+  },
+  {
+    label: "Sub Contractor Payments",
+    icon: Wallet,
+    permissions: ["contacts.manage"],
+    href: "/sub-contractor-payments",
   },
   {
     label: "Reports",
     icon: BarChart3,
     permissions: ["reports.view"],
     href: "/reports",
-  },
-  {
-    label: "Contacts",
-    icon: Users,
-    permissions: ["contacts.manage"],
-    href: "/contacts",
+    children: [
+      {
+        label: "Main Reports",
+        href: "/reports",
+        icon: BarChart3,
+        permissions: ["reports.view"],
+      },
+      {
+        label: "Sub Contractor Payables",
+        href: "/reports/sub-contractor-payables",
+        icon: WalletCards,
+        permissions: ["reports.view", "contacts.manage"],
+      },
+    ],
   },
   {
     label: "Settings",
@@ -174,11 +225,11 @@ const NAV_GROUPS: NavGroup[] = [
 
 function isActive(pathname: string, href: string) {
   if (href === "/dashboard") return pathname === href;
-  return pathname === href || pathname.startsWith(href);
+  return pathname === href || pathname.startsWith(`${href}/`);
 }
 
 function groupHasActive(pathname: string, group: NavGroup) {
-  if (group.href) return isActive(pathname, group.href);
+  if (group.href && isActive(pathname, group.href)) return true;
   return (group.children ?? []).some((item) => isActive(pathname, item.href));
 }
 
@@ -264,31 +315,32 @@ function SidebarLink({
   );
 }
 
-function SidebarGroupButton({
+function SidebarGroupRow({
   label,
+  href,
   icon: Icon,
   collapsed,
   active,
   open,
-  onClick,
+  onToggle,
 }: {
   label: string;
+  href?: string;
   icon: React.ElementType;
   collapsed: boolean;
   active: boolean;
   open: boolean;
-  onClick: () => void;
+  onToggle: () => void;
 }) {
+  const router = useRouter();
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={collapsed ? label : undefined}
+    <div
       className={cn(
-        "group relative flex w-full items-center gap-3 rounded-2xl",
+        "group relative flex items-center gap-3 rounded-2xl",
         collapsed ? "justify-center px-2 py-2.5" : "px-3 py-2.5",
         "transition-all duration-300 ease-out",
-        "hover:bg-white/8 hover:ring-1 hover:ring-white/10 hover:translate-x-[2px]",
+        "hover:bg-white/8 hover:ring-1 hover:ring-white/10",
         active && "bg-white/10 ring-1 ring-white/12 shadow-[0_10px_30px_rgba(255,122,24,0.08)]"
       )}
     >
@@ -296,35 +348,54 @@ function SidebarGroupButton({
         <span className="absolute left-2 top-1/2 h-6 w-1 -translate-y-1/2 rounded-full bg-[#ff7a18] shadow-[0_0_0_6px_rgba(255,122,24,0.12)]" />
       )}
 
-      <span
+      <button
+        type="button"
+        title={collapsed ? label : undefined}
+        onClick={() => {
+          if (href) router.push(href);
+        }}
         className={cn(
-          "relative grid size-10 place-items-center rounded-2xl ring-1 transition",
-          active ? "bg-white/12 ring-white/16" : "bg-white/7 ring-white/10",
-          "group-hover:bg-white/12"
+          "flex min-w-0 flex-1 items-center gap-3 text-left",
+          collapsed && "justify-center"
         )}
       >
-        <Icon className={cn("size-4.5", active ? "text-white" : "text-white/85")} />
-      </span>
+        <span
+          className={cn(
+            "relative grid size-10 place-items-center rounded-2xl ring-1 transition",
+            active ? "bg-white/12 ring-white/16" : "bg-white/7 ring-white/10",
+            "group-hover:bg-white/12"
+          )}
+        >
+          <Icon className={cn("size-4.5", active ? "text-white" : "text-white/85")} />
+        </span>
 
-      {!collapsed && (
-        <>
-          <div className="min-w-0 flex-1 text-left">
+        {!collapsed && (
+          <div className="min-w-0 flex-1">
             <div className={cn("truncate text-sm font-medium", active ? "text-white" : "text-white/85")}>
               {label}
             </div>
           </div>
+        )}
+      </button>
 
-          <ChevronsUpDown
+      {!collapsed && (
+        <button
+          type="button"
+          onClick={onToggle}
+          className="grid h-8 w-8 place-items-center rounded-xl text-white/60 transition hover:bg-white/10 hover:text-white"
+          aria-label={`Toggle ${label}`}
+        >
+          <ChevronDown
             className={cn(
-              "size-4 shrink-0 text-white/60 transition-transform duration-300",
+              "size-4 transition-transform duration-300",
               open && "rotate-180 text-white"
             )}
           />
-        </>
+        </button>
       )}
 
       <span className="pointer-events-none absolute inset-0 rounded-2xl bg-[linear-gradient(90deg,transparent,rgba(255,122,24,0.08),transparent)] opacity-0 transition group-hover:opacity-100" />
-    </button>
+    </div>
   );
 }
 
@@ -340,7 +411,8 @@ function SidebarInner({ inDrawer = false }: { inDrawer?: boolean }) {
     Invoices: true,
     Quotations: true,
     "Credit Notes": true,
-    Contract: true,
+    Contact: true,
+    Reports: true,
   });
 
   React.useEffect(() => {
@@ -570,13 +642,14 @@ function SidebarInner({ inDrawer = false }: { inDrawer?: boolean }) {
                     active && !collapsed && "bg-white/[0.04] ring-1 ring-white/8"
                   )}
                 >
-                  <SidebarGroupButton
+                  <SidebarGroupRow
                     label={group.label}
+                    href={group.href}
                     icon={group.icon}
                     collapsed={collapsed}
                     active={active}
                     open={isOpen}
-                    onClick={() => toggleGroup(group.label)}
+                    onToggle={() => toggleGroup(group.label)}
                   />
 
                   {!collapsed && (

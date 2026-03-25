@@ -248,24 +248,25 @@ export default function NewQuotationPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          quotation_no: quotationNo,
-          customer_id: customerMode === "LIST" && customerId ? Number(customerId) : null,
-          customer_name: customerName || null,
-          customer_vat: customerVat || null,
-          customer_brn: customerBrn || null,
-          customer_address: customerAddress || null,
-          quote_date: quoteDate,
-          site_address: siteAddress || null,
-          vat_rate: 0.15,
-          notes,
-          items: items
-            .map((i) => ({
-              description: String(i.description ?? "").trim(),
-              qty: n2(i.qty),
-              price: n2(i.price),
-            }))
-            .filter((i) => i.description),
-        }),
+         quote_no: quotationNo,
+         quotation_no: quotationNo,
+         customer_id: customerMode === "LIST" && customerId ? Number(customerId) : null,
+         customer_name: customerName || null,
+         customer_vat: customerVat || null,
+         customer_brn: customerBrn || null,
+         customer_address: customerAddress || null,
+         quote_date: quoteDate,
+         site_address: siteAddress || null,
+         vat_rate: 0.15,
+         notes,
+         items: items
+           .map((i) => ({
+            description: String(i.description ?? "").trim(),
+             qty: n2(i.qty),
+             price: n2(i.price),
+        }))
+         .filter((i) => i.description),
+       }),
       });
 
       const json = await res.json();

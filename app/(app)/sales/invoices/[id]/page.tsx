@@ -22,6 +22,8 @@ import {
   BadgeCheck,
   ReceiptText,
   ArrowUpRight,
+  Link2,
+  Download,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -82,6 +84,19 @@ type IssueResponse = {
   data?: { id: string; invoice_no?: string; status?: string };
   error?: any;
   supabaseError?: any;
+};
+
+type ShareLinkResponse = {
+  ok: boolean;
+  data?: {
+    token?: string;
+    share_url?: string;
+    invoice_no?: string;
+    expires_at?: string;
+  };
+  error?: any;
+  supabaseError?: any;
+  details?: any;
 };
 
 /* =========================
@@ -292,14 +307,15 @@ export default function InvoiceDetailsPage() {
 
   const [loading, setLoading] = React.useState(false);
   const [issuing, setIssuing] = React.useState(false);
+  const [creatingShare, setCreatingShare] = React.useState(false);
+  const [copyingShare, setCopyingShare] = React.useState(false);
   const [err, setErr] = React.useState("");
 
   const [invoice, setInvoice] = React.useState<ApiInvoice | null>(null);
   const [items, setItems] = React.useState<ApiItem[]>([]);
   const [lastSync, setLastSync] = React.useState<Date | null>(null);
-
-  const baseOrigin =
-    typeof window !== "undefined" ? window.location.origin : "";
+  const [shareUrl, setShareUrl] = React.useState("");
+  const [shareExpiresAt, setShareExpiresAt] = React.useState("");
 
   const load = React.useCallback(async () => {
     if (!hasId) return;
@@ -333,6 +349,105 @@ export default function InvoiceDetailsPage() {
   React.useEffect(() => {
     void load();
   }, [load]);
+
+  const createShareLink = React.useCallback(async () => {
+    if (!hasId || !invoice) return "";
+
+    setCreatingShare(true);
+    setErr("");
+
+    try {
+      const res = await fetch(`/api/invoices/${id}/share-link`, {
+        method: "POST",
+      });
+
+      const j = await safeJson<ShareLinkResponse>(res);
+
+      if (!j.ok || !j.data?.share_url) {
+        throw new Error(j?.error?.message ?? j?.error ?? "Failed to create private share link");
+      }
+
+      setShareUrl(j.data.share_url);
+      setShareExpiresAt(j.data.expires_at ?? "");
+      return j.data.share_url;
+    } catch (e: any) {
+      const message = e?.message || "Failed to create private share link";
+      setErr(message);
+      throw new Error(message);
+    } finally {
+      setCreatingShare(false);
+    }
+  }, [hasId, id, invoice]);
+
+  const copyShareLink = React.useCallback(async () => {
+    try {
+      setCopyingShare(true);
+      const url = shareUrl || (await createShareLink());
+      if (!url) return;
+
+      await navigator.clipboard.writeText(url);
+      alert("Private invoice link copied.");
+    } catch (e: any) {
+      alert(e?.message || "Failed to copy share link");
+    } finally {
+      setCopyingShare(false);
+    }
+  }, [createShareLink, shareUrl]);
+
+  const sendWhatsappInvoice = React.useCallback(async () => {
+    try {
+      if (!invoice || !hasId) return;
+
+      const privateUrl = shareUrl || (await createShareLink());
+
+      const message = `Hello,
+
+Please find your ${invoiceTypeLabel(invoice.invoice_type)} from KS Contracting Ltd.
+Invoice No: ${invoice.invoice_no}
+Amount: ${money(invoice.total_amount)}
+
+View invoice:
+${privateUrl}
+
+You can also download the PDF from the same page.
+
+Thank you.`;
+
+      window.open(
+        `https://wa.me/?text=${encodeURIComponent(message)}`,
+        "_blank",
+        "noopener,noreferrer"
+      );
+    } catch (e: any) {
+      alert(e?.message || "Failed to prepare WhatsApp invoice link");
+    }
+  }, [createShareLink, hasId, invoice, shareUrl]);
+
+  const sendEmailInvoice = React.useCallback(async () => {
+    try {
+      if (!invoice || !hasId) return;
+
+      const privateUrl = shareUrl || (await createShareLink());
+
+      const emailSubject = `${invoiceTypeLabel(invoice.invoice_type)} - ${invoice.invoice_no} - KS Contracting Ltd`;
+      const emailBody = `Hello,
+
+Please find your ${invoiceTypeLabel(invoice.invoice_type)} from KS Contracting Ltd.
+Invoice No: ${invoice.invoice_no}
+Amount: ${money(invoice.total_amount)}
+
+View invoice:
+${privateUrl}
+
+You can also download the PDF from the same page.
+
+Thank you.`;
+
+      window.location.href = `mailto:?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
+    } catch (e: any) {
+      alert(e?.message || "Failed to prepare email invoice link");
+    }
+  }, [createShareLink, hasId, invoice, shareUrl]);
 
   const issueInvoice = React.useCallback(async () => {
     if (!hasId) return;
@@ -375,45 +490,12 @@ export default function InvoiceDetailsPage() {
   const invoiceType = invoiceTypeLabel(invoice?.invoice_type);
 
   const printPath = hasId ? `/sales/invoices/${id}/print` : "#";
-  const printUrl = hasId ? `${baseOrigin}${printPath}` : "";
-
-  const whatsappText = invoice
-    ? `Hello,
-
-Please find your ${invoiceType} from KS Contracting Ltd.
-Invoice No: ${invoice.invoice_no}
-Amount: ${money(total)}
-
-View invoice:
-${printUrl}
-
-Thank you.`
-    : "";
-
-  const whatsappUrl = invoice
-    ? `https://wa.me/?text=${encodeURIComponent(whatsappText)}`
-    : "#";
-
-  const emailSubject = invoice
-    ? `${invoiceType} - ${invoice.invoice_no} - KS Contracting Ltd`
-    : "KS Contracting Invoice";
-
-  const emailBody = invoice
-    ? `Hello,
-
-Please find your ${invoiceType} from KS Contracting Ltd.
-Invoice No: ${invoice.invoice_no}
-Amount: ${money(total)}
-
-View invoice:
-${printUrl}
-
-Thank you.`
+  const pdfDownloadPath = shareUrl
+    ? shareUrl.replace("/share/invoice/", "/api/public/invoice-pdf/")
     : "";
 
   return (
     <div className="space-y-5">
-      {/* Header */}
       <Surface className="overflow-hidden">
         <div className="absolute inset-0 bg-[linear-gradient(135deg,#071b38_0%,#0d2c59_48%,#163d73_100%)]" />
         <div className="absolute inset-0 opacity-80 bg-[radial-gradient(900px_320px_at_-10%_-20%,rgba(255,255,255,0.14),transparent_55%),radial-gradient(700px_300px_at_110%_0%,rgba(255,153,51,0.20),transparent_50%)]" />
@@ -495,6 +577,13 @@ Thank you.`
                     Site: <span className="font-semibold text-white">{invoice.site_address}</span>
                   </span>
                 ) : null}
+
+                {shareExpiresAt ? (
+                  <span className="inline-flex items-center gap-2">
+                    <Link2 className="size-4 text-blue-100/80" />
+                    Private link expires: <span className="font-semibold text-white">{fmtDate(shareExpiresAt)}</span>
+                  </span>
+                ) : null}
               </div>
             </div>
 
@@ -544,7 +633,6 @@ Thank you.`
         </div>
       </Surface>
 
-      {/* KPI row */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-4">
         <StatBox label="Sub Total" value={invoice ? money(subtotal) : "—"} />
         <StatBox label="VAT 15%" value={invoice ? money(vat) : "—"} />
@@ -557,9 +645,7 @@ Thank you.`
         />
       </div>
 
-      {/* Content */}
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px] items-start">
-        {/* LEFT */}
         <div className="space-y-4">
           <Surface>
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-4 sm:px-5">
@@ -578,7 +664,6 @@ Thank you.`
               ) : null}
             </div>
 
-            {/* Desktop items */}
             <div className="hidden md:block p-4 sm:p-5">
               <div className="grid grid-cols-[minmax(0,1.8fr)_90px_150px_140px_160px] gap-3 rounded-2xl bg-slate-50 px-4 py-3">
                 <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Description</div>
@@ -631,7 +716,6 @@ Thank you.`
               </div>
             </div>
 
-            {/* Mobile items */}
             <div className="md:hidden p-4">
               <div className="space-y-3">
                 {loading ? (
@@ -741,9 +825,7 @@ Thank you.`
           </Surface>
         </div>
 
-        {/* RIGHT */}
         <div className="space-y-4 xl:sticky xl:top-[92px]">
-          {/* Customer card */}
           <Surface>
             <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
               <div className="flex items-start justify-between gap-3">
@@ -781,7 +863,6 @@ Thank you.`
             </div>
           </Surface>
 
-          {/* Actions card */}
           <Surface>
             <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
               <div className="flex items-start justify-between gap-3">
@@ -833,29 +914,63 @@ Thank you.`
                 </Button>
               </Link>
 
-              <a href={whatsappUrl} target="_blank" rel="noreferrer">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-11 w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
-                  disabled={!invoice || !hasId}
-                >
+              <Button
+                type="button"
+                variant="outline"
+                className="h-11 w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
+                disabled={!invoice || !hasId || creatingShare}
+                onClick={sendWhatsappInvoice}
+              >
+                {creatingShare ? (
+                  <RefreshCw className="mr-2 size-4 animate-spin" />
+                ) : (
                   <MessageCircle className="mr-2 size-4" />
-                  Send by WhatsApp
-                </Button>
-              </a>
+                )}
+                Send by WhatsApp
+              </Button>
 
-              <a href={invoice ? `mailto:?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}` : "#"}>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-11 w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
-                  disabled={!invoice || !hasId}
-                >
+              <Button
+                type="button"
+                variant="outline"
+                className="h-11 w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
+                disabled={!invoice || !hasId || creatingShare}
+                onClick={sendEmailInvoice}
+              >
+                {creatingShare ? (
+                  <RefreshCw className="mr-2 size-4 animate-spin" />
+                ) : (
                   <Mail className="mr-2 size-4" />
-                  Send by Email
-                </Button>
-              </a>
+                )}
+                Send by Email
+              </Button>
+
+              <Button
+                type="button"
+                variant="outline"
+                className="h-11 w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
+                disabled={!invoice || !hasId || creatingShare || copyingShare}
+                onClick={copyShareLink}
+              >
+                {copyingShare ? (
+                  <RefreshCw className="mr-2 size-4 animate-spin" />
+                ) : (
+                  <Link2 className="mr-2 size-4" />
+                )}
+                Copy Private Link
+              </Button>
+
+              {shareUrl ? (
+                <a href={pdfDownloadPath} target="_blank" rel="noreferrer">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
+                  >
+                    <Download className="mr-2 size-4" />
+                    Download Real PDF
+                  </Button>
+                </a>
+              ) : null}
 
               <Button
                 variant="outline"

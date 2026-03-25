@@ -172,11 +172,11 @@ export default function InvoicePrintPage() {
 
   React.useEffect(() => {
     const style = document.createElement("style");
-    style.setAttribute("data-ks-print", "1");
+    style.setAttribute("data-ks-print", "invoice-print");
     style.innerHTML = `
       @page {
         size: A4 portrait;
-        margin: 0;
+        margin: 8mm;
       }
 
       html, body {
@@ -187,7 +187,6 @@ export default function InvoicePrintPage() {
         print-color-adjust: exact;
       }
 
-      /* Screen preview */
       #ks-print-page {
         min-height: 100vh;
       }
@@ -203,19 +202,15 @@ export default function InvoicePrintPage() {
         margin: 0 auto;
       }
 
-      /* A4 paper preview on screen */
       #ks-paper {
         width: 210mm;
-        min-height: 297mm;
         background: #ffffff;
         box-shadow: 0 16px 48px rgba(2, 6, 23, 0.12);
       }
 
-      /* Actual invoice block inside paper */
       #ks-print-root {
         width: 194mm;
-        min-height: 281mm;
-        margin: 8mm auto;
+        margin: 0 auto;
         background: #ffffff;
       }
 
@@ -243,63 +238,48 @@ export default function InvoicePrintPage() {
         html, body {
           margin: 0 !important;
           padding: 0 !important;
-          width: 210mm !important;
-          height: 297mm !important;
           background: #ffffff !important;
-          overflow: hidden !important;
+          overflow: visible !important;
         }
 
         body * {
           visibility: hidden !important;
         }
 
-        #ks-print-page,
-        #ks-print-page * {
+        #ks-print-root,
+        #ks-print-root * {
           visibility: visible !important;
         }
 
-        #ks-print-page {
-          position: fixed !important;
-          inset: 0 !important;
-          width: 210mm !important;
-          height: 297mm !important;
-          margin: 0 !important;
+        #ks-print-root {
+          position: absolute !important;
+          left: 0 !important;
+          top: 0 !important;
+          width: 194mm !important;
+          max-width: 194mm !important;
+          margin: 0 auto !important;
           padding: 0 !important;
           background: #ffffff !important;
-          overflow: hidden !important;
+          overflow: visible !important;
+          box-shadow: none !important;
+          break-inside: avoid !important;
+          page-break-inside: avoid !important;
         }
 
+        #ks-paper,
         #ks-preview-shell,
         #ks-preview-frame {
-          width: 210mm !important;
+          width: auto !important;
+          min-height: auto !important;
           margin: 0 !important;
           padding: 0 !important;
-          overflow: hidden !important;
+          overflow: visible !important;
+          box-shadow: none !important;
+          background: #ffffff !important;
         }
 
         .ks-screen-scale {
           transform: none !important;
-        }
-
-        #ks-paper {
-          width: 210mm !important;
-          height: 297mm !important;
-          min-height: 297mm !important;
-          margin: 0 !important;
-          padding: 0 !important;
-          background: #ffffff !important;
-          box-shadow: none !important;
-          overflow: hidden !important;
-        }
-
-        #ks-print-root {
-          width: 194mm !important;
-          min-height: 281mm !important;
-          max-width: 194mm !important;
-          margin: 8mm auto !important;
-          padding: 0 !important;
-          background: #ffffff !important;
-          box-shadow: none !important;
         }
 
         .print\\:hidden {
