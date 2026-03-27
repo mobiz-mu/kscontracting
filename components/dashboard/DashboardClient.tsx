@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
@@ -188,7 +188,7 @@ function fmtDateTime(v?: Date | null) {
   const yyyy = d.getFullYear();
   const hh = String(d.getHours()).padStart(2, "0");
   const mi = String(d.getMinutes()).padStart(2, "0");
-  return `${dd}/${mm}/${yyyy} • ${hh}:${mi}`;
+  return `${dd}/${mm}/${yyyy} â€¢ ${hh}:${mi}`;
 }
 
 function startOfMonth(d: Date) {
@@ -387,7 +387,7 @@ export default function DashboardClient() {
 
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
-  const [lastSync, setLastSync] = React.useState(fmtDateTime(new Date()));
+  const [lastSync, setLastSync] = React.useState("");
 
   const [invoices, setInvoices] = React.useState<InvoiceRow[]>([]);
   const [quotations, setQuotations] = React.useState<QuotationRow[]>([]);
@@ -562,10 +562,10 @@ export default function DashboardClient() {
       ]);
 
       const agingBuckets: AgingBucket[] = [
-        { name: "0–15", value: 0 },
-        { name: "16–30", value: 0 },
-        { name: "31–60", value: 0 },
-        { name: "61–90", value: 0 },
+        { name: "0â€“15", value: 0 },
+        { name: "16â€“30", value: 0 },
+        { name: "31â€“60", value: 0 },
+        { name: "61â€“90", value: 0 },
         { name: "90+", value: 0 },
       ];
 
@@ -611,7 +611,7 @@ export default function DashboardClient() {
           overdue30: 0,
           overdue60: 0,
           overdue90: 0,
-          lastInvoice: "—",
+          lastInvoice: "â€”",
           lastTs: 0,
         };
 
@@ -622,7 +622,7 @@ export default function DashboardClient() {
 
         if (ts >= current.lastTs) {
           current.lastTs = ts;
-          current.lastInvoice = inv.invoice_no || "—";
+          current.lastInvoice = inv.invoice_no || "â€”";
         }
 
         dueMap.set(customer, current);
@@ -750,8 +750,8 @@ export default function DashboardClient() {
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div className="rounded-2xl bg-white/10 px-3 py-2 text-xs font-semibold text-white ring-1 ring-white/15">
-                {lastSync}
+              <div suppressHydrationWarning className="rounded-2xl bg-white/10 px-3 py-2 text-xs font-semibold text-white ring-1 ring-white/15">
+                {lastSync || "—"}
               </div>
               <Button
                 onClick={() => void load()}
@@ -785,7 +785,7 @@ export default function DashboardClient() {
               <div className="text-sm font-extrabold tracking-tight text-slate-950">
                 Revenue / Collections / Credits
               </div>
-              <div className="mt-0.5 text-xs text-slate-500">Mar 2026 → Feb 2027</div>
+              <div className="mt-0.5 text-xs text-slate-500">Mar 2026 â†’ Feb 2027</div>
             </div>
 
             <div className="rounded-full bg-slate-50 px-3 py-1.5 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-200">
@@ -904,7 +904,7 @@ export default function DashboardClient() {
                   <div className="text-xs font-extrabold tracking-tight text-slate-950">
                     Payment Effected vs Dues
                   </div>
-                  <div className="text-[11px] text-slate-500">Mar 2026 → Feb 2027</div>
+                  <div className="text-[11px] text-slate-500">Mar 2026 â†’ Feb 2027</div>
                 </div>
 
                 <div className="flex items-center gap-3 text-[11px] font-semibold">
@@ -1234,7 +1234,7 @@ export default function DashboardClient() {
       <ShellCard className="p-4 sm:p-5">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-sm font-extrabold tracking-tight text-slate-950">Top Due Customers</div>
-          <div className="text-xs font-semibold text-slate-500">{fmtDateTime(new Date())}</div>
+          <div className="text-xs font-semibold text-slate-500">{lastSync || "—"}</div>
         </div>
 
         <div className="mt-3 overflow-hidden rounded-2xl border border-slate-200">

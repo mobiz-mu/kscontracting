@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import * as React from "react";
 import Link from "next/link";
@@ -67,7 +67,7 @@ function newItem(): Item {
   return {
     id: crypto.randomUUID(),
     description: "",
-    qty: "",
+    qty: "1",
     price: "",
   };
 }
@@ -372,7 +372,7 @@ export default function NewCreditNotePage() {
                     <div className="px-4 py-3 text-sm text-slate-500">No customers found</div>
                   ) : (
                     filteredCustomers.map((c) => {
-                      const name = c.name ?? c.customer_name ?? "—";
+                      const name = c.name ?? c.customer_name ?? "â€”";
                       return (
                         <button
                           key={String(c.id)}

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
@@ -139,7 +139,7 @@ export default function NewQuotationPage() {
   const custInputRef = React.useRef<HTMLInputElement | null>(null);
 
   const [items, setItems] = React.useState<Item[]>([
-    { id: crypto.randomUUID(), description: "", qty: "", price: "", total: 0 },
+    { id: crypto.randomUUID(), description: "", qty: "1", price: "", total: 0 },
   ]);
 
   const [loading, setLoading] = React.useState(false);
@@ -174,7 +174,7 @@ export default function NewQuotationPage() {
   function addItem() {
     setItems((prev) => [
       ...prev,
-      { id: crypto.randomUUID(), description: "", qty: "", price: "", total: 0 },
+      { id: crypto.randomUUID(), description: "", qty: "1", price: "", total: 0 },
     ]);
   }
 
@@ -183,7 +183,7 @@ export default function NewQuotationPage() {
     setItems(
       newItems.length
         ? newItems
-        : [{ id: crypto.randomUUID(), description: "", qty: "", price: "", total: 0 }]
+        : [{ id: crypto.randomUUID(), description: "", qty: "1", price: "", total: 0 }]
     );
   }
 
@@ -306,46 +306,28 @@ export default function NewQuotationPage() {
   }
 
   React.useEffect(() => {
-    let alive = true;
+  let alive = true;
 
-    (async () => {
-      try {
-        const j = await safeGet<{ ok: boolean; data?: any[] }>("/api/quotations?page=1&pageSize=200");
-        const data = (j?.data ?? []) as Array<{ quotation_no?: string; quote_no?: string }>;
+  (async () => {
+    try {
+      const j = await safeGet<{ ok: boolean; data?: any }>("/api/settings/company");
+      const s = j?.data ?? {};
 
-        const nums = data
-          .map((x) => parseQuoteNo(x.quotation_no || x.quote_no || ""))
-          .filter((n) => Number.isFinite(n)) as number[];
+      const prefix = String(s.quote_prefix ?? "QTN").trim() || "QTN";
+      const nextNum = Math.max(1, Number(s.next_quote_no ?? 1) || 1);
 
-        const max = nums.length ? Math.max(...nums) : NaN;
+      if (!alive) return;
+      setQuotationNo(`${prefix}-${pad4(nextNum)}`);
+    } catch {
+      if (!alive) return;
+      setQuotationNo(`QTN-${pad4(1)}`);
+    }
+  })();
 
-        let nextNum = 1;
-        if (Number.isFinite(max)) {
-          nextNum = max + 1;
-        } else {
-          let last = 0;
-          try {
-            last = Number(localStorage.getItem("ks.quotation.lastNo") || "0") || 0;
-          } catch {}
-          nextNum = last + 1;
-        }
-
-        try {
-          localStorage.setItem("ks.quotation.lastNo", String(nextNum));
-        } catch {}
-
-        if (!alive) return;
-        setQuotationNo(`QUO-${pad4(nextNum)}`);
-      } catch {
-        if (!alive) return;
-        setQuotationNo(`QUO-${pad4(1)}`);
-      }
-    })();
-
-    return () => {
-      alive = false;
-    };
-  }, []);
+  return () => {
+    alive = false;
+  };
+}, []);
 
   React.useEffect(() => {
     let alive = true;
@@ -409,7 +391,7 @@ export default function NewQuotationPage() {
 
                 <span className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-3 py-1 font-semibold ring-1 ring-slate-200">
                   <Hash className="size-3.5 text-slate-500" />
-                  {quotationNo || "—"}
+                  {quotationNo || "â€”"}
                 </span>
 
                 <span className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-3 py-1 font-semibold ring-1 ring-slate-200">
@@ -545,7 +527,7 @@ export default function NewQuotationPage() {
                   <div className="px-4 py-4 text-sm text-slate-600">No customers found.</div>
                 ) : (
                   filteredCustomers.map((c, idx) => {
-                    const name = c.name ?? c.customer_name ?? "—";
+                    const name = c.name ?? c.customer_name ?? "â€”";
                     const active = idx === custActiveIdx;
 
                     return (
@@ -564,7 +546,7 @@ export default function NewQuotationPage() {
                           <div className="min-w-0">
                             <div className="truncate text-sm font-semibold text-slate-900">{name}</div>
                             <div className="mt-0.5 truncate text-xs text-slate-600">
-                              {c.address ? c.address : "—"}
+                              {c.address ? c.address : "â€”"}
                             </div>
                           </div>
                           <div className="shrink-0 text-right text-xs text-slate-500">
@@ -747,3 +729,5 @@ export default function NewQuotationPage() {
     </div>
   );
 }
+
+

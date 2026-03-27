@@ -15,13 +15,22 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import InvoiceKSDoc, { type KSInvoiceDocData } from "@/components/ksdoc/InvoiceKSDoc";
+import InvoiceKSDoc, {
+  type KSInvoiceDocData,
+} from "@/components/ksdoc/InvoiceKSDoc";
 
 type ApiInvoice = {
   id: string;
   invoice_no: string;
   status?: string | null;
-  invoice_type?: "VAT_INVOICE" | "PRO_FORMA" | "STANDARD" | "VAT" | "PROFORMA" | string | null;
+  invoice_type?:
+    | "VAT_INVOICE"
+    | "PRO_FORMA"
+    | "STANDARD"
+    | "VAT"
+    | "PROFORMA"
+    | string
+    | null;
   invoice_date?: string | null;
   notes?: string | null;
   subtotal?: number | null;
@@ -262,8 +271,6 @@ export default function InvoicePrintPage() {
           background: #ffffff !important;
           overflow: visible !important;
           box-shadow: none !important;
-          break-inside: avoid !important;
-          page-break-inside: avoid !important;
         }
 
         #ks-paper,
@@ -327,7 +334,7 @@ export default function InvoicePrintPage() {
         addressLines: [
           "MORCELLEMENT CARLOS, TAMARIN",
           "Tel: 5941 6756 • Email: ks.contracting@hotmail.com",
-          "BRN: 18160190 • VAT: 27658608",
+          "BRN: C18160190 • VAT: 27658608",
         ],
       },
       doc: {
@@ -343,14 +350,58 @@ export default function InvoicePrintPage() {
         issueDate: invoice.invoice_date ?? "",
         dueDate: "",
       },
-      billTo: {
-        name: cust?.name ?? "—",
-        lines: [
-          cust?.vat_no ? `Client VAT Reg. No.: ${cust.vat_no}` : "Client VAT Reg. No.:",
-          cust?.brn ? `Client BRN No.: ${cust.brn}` : "Client BRN No.:",
-          invoice.site_address ? `Site Address: ${invoice.site_address}` : "Site Address:",
-        ],
-      },
+      
+ billTo: {
+  name:
+    (invoice as any)?.customer_name ||
+    (invoice as any)?.client_name ||
+    cust?.name ||
+    "",
+  address:
+    (invoice as any)?.customer_address ||
+    (invoice as any)?.client_address ||
+    cust?.address ||
+    invoice.site_address ||
+    "",
+  brn:
+    (invoice as any)?.customer_brn ||
+    (invoice as any)?.client_brn ||
+    cust?.brn ||
+    "",
+  vat:
+    (invoice as any)?.customer_vat ||
+    (invoice as any)?.customer_vat_no ||
+    (invoice as any)?.client_vat ||
+    cust?.vat_no ||
+    "",
+  siteAddress: invoice.site_address ?? "",
+  lines: [
+    (invoice as any)?.customer_name
+      ? `Name: ${(invoice as any).customer_name}`
+      : (invoice as any)?.client_name
+      ? `Name: ${(invoice as any).client_name}`
+      : "",
+    (invoice as any)?.customer_address
+      ? `Address: ${(invoice as any).customer_address}`
+      : (invoice as any)?.client_address
+      ? `Address: ${(invoice as any).client_address}`
+      : "",
+    (invoice as any)?.customer_brn
+      ? `BRN No.: ${(invoice as any).customer_brn}`
+      : (invoice as any)?.client_brn
+      ? `BRN No.: ${(invoice as any).client_brn}`
+      : "",
+    (invoice as any)?.customer_vat
+      ? `VAT No.: ${(invoice as any).customer_vat}`
+      : (invoice as any)?.customer_vat_no
+      ? `VAT No.: ${(invoice as any).customer_vat_no}`
+      : (invoice as any)?.client_vat
+      ? `VAT No.: ${(invoice as any).client_vat}`
+      : "",
+    invoice.site_address ? `Site Address: ${invoice.site_address}` : "",
+  ].filter(Boolean),
+},
+
       items: (items ?? []).map((it) => {
         const qty = n2(it.qty);
         const unit =
@@ -509,7 +560,11 @@ export default function InvoicePrintPage() {
                   <InvoiceKSDoc data={doc} variant="invoice" />
                 ) : (
                   <div className="print:hidden rounded-[28px] border border-slate-200 bg-white p-6 text-sm text-slate-600 shadow-[0_18px_60px_rgba(2,6,23,0.08)]">
-                    {loading ? "Loading invoice…" : hasId ? "No document available." : "Missing invoice id."}
+                    {loading
+                      ? "Loading invoice…"
+                      : hasId
+                      ? "No document available."
+                      : "Missing invoice id."}
                   </div>
                 )}
               </div>

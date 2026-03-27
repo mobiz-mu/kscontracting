@@ -82,7 +82,7 @@ type AccessApiResponse = {
 const DEFAULT_SETTINGS: CompanySettingsRow = {
   id: 0,
   company_name: "KS CONTRACTING LTD",
-  brn: "18160190",
+  brn: "C18160190",
   vat_no: "27658608",
   address: "MORCELLEMENT CARLOS, TAMARIN, MAURITIUS",
   phone: "59416756",

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import * as React from "react";
 import Link from "next/link";
@@ -89,7 +89,7 @@ function todayISO() {
 }
 
 function fmtDate(v?: string | null) {
-  if (!v) return "—";
+  if (!v) return "â€”";
   if (/^\d{4}-\d{2}-\d{2}$/.test(v)) {
     const [yyyy, mm, dd] = v.split("-");
     return `${dd}/${mm}/${yyyy}`;
@@ -296,7 +296,7 @@ export default function NewInvoicePage() {
   const vatRate = 0.15;
 
   const [rows, setRows] = React.useState<Row[]>([
-    { id: crypto.randomUUID(), description: "", qty: "", price: "" },
+    { id: crypto.randomUUID(), description: "", qty: "1", price: "" },
   ]);
 
   const descRefs = React.useRef<Record<string, HTMLTextAreaElement | null>>({});
@@ -331,7 +331,7 @@ export default function NewInvoicePage() {
 
   function addRow(focus: "desc" | "qty" | "price" = "desc") {
     const id = crypto.randomUUID();
-    setRows((p) => [...p, { id, description: "", qty: "", price: "" }]);
+    setRows((p) => [...p, { id, description: "", qty: "1", price: "" }]);
     requestAnimationFrame(() => {
       if (focus === "desc") descRefs.current[id]?.focus();
       if (focus === "qty") qtyRefs.current[id]?.focus();
@@ -342,7 +342,7 @@ export default function NewInvoicePage() {
   function removeRow(id: string) {
     setRows((p) => {
       const next = p.filter((r) => r.id !== id);
-      return next.length ? next : [{ id: crypto.randomUUID(), description: "", qty: "", price: "" }];
+      return next.length ? next : [{ id: crypto.randomUUID(), description: "", qty: "1", price: "" }];
     });
   }
 
@@ -505,58 +505,34 @@ export default function NewInvoicePage() {
   }
 
   React.useEffect(() => {
-    let alive = true;
+  let alive = true;
 
-    (async () => {
-      try {
-        const isProForma = invoiceType === "PRO_FORMA";
-        const prefix = isProForma ? "PFI" : "INV";
-        const storageKey = isProForma ? "ks.proforma.lastNo" : "ks.invoice.lastNo";
+  (async () => {
+    try {
+      const j = await safeGet<{ ok: boolean; data?: any }>("/api/settings/company");
+      const s = j?.data ?? {};
 
-        const j = await safeGet<{ ok: boolean; data?: any[] }>("/api/invoices?page=1&pageSize=200");
-        const data = (j?.data ?? []) as Array<{
-          invoice_no?: string;
-          invoice_type?: string;
-        }>;
+      const isProForma = invoiceType === "PRO_FORMA";
+      const prefix = isProForma
+        ? "PFI"
+        : String(s.invoice_prefix ?? "INV").trim() || "INV";
 
-        const filtered = data.filter((x) =>
-          isProForma ? x.invoice_type === "PRO_FORMA" : x.invoice_type === "VAT_INVOICE"
-        );
+      const nextNum = isProForma
+        ? 1
+        : Math.max(1, Number(s.next_invoice_no ?? 1) || 1);
 
-        const nums = filtered
-          .map((x) => parseInvNo(x.invoice_no || ""))
-          .filter((n) => Number.isFinite(n)) as number[];
+      if (!alive) return;
+      setInvoiceNo(`${prefix}-${pad4(nextNum)}`);
+    } catch {
+      if (!alive) return;
+      setInvoiceNo(invoiceType === "PRO_FORMA" ? `PFI-${pad4(1)}` : `INV-${pad4(1)}`);
+    }
+  })();
 
-        const max = nums.length ? Math.max(...nums) : NaN;
-
-        let nextNum = 1;
-
-        if (Number.isFinite(max)) {
-          nextNum = max + 1;
-        } else {
-          let last = 0;
-          try {
-            last = Number(localStorage.getItem(storageKey) || "0") || 0;
-          } catch {}
-          nextNum = last + 1;
-        }
-
-        try {
-          localStorage.setItem(storageKey, String(nextNum));
-        } catch {}
-
-        if (!alive) return;
-        setInvoiceNo(`${prefix}-${pad4(nextNum)}`);
-      } catch {
-        if (!alive) return;
-        setInvoiceNo(invoiceType === "PRO_FORMA" ? `PFI-${pad4(1)}` : `INV-${pad4(1)}`);
-      }
-    })();
-
-    return () => {
-      alive = false;
-    };
-  }, [invoiceType]);
+  return () => {
+    alive = false;
+  };
+}, [invoiceType]);
 
   React.useEffect(() => {
     let alive = true;
@@ -761,7 +737,7 @@ export default function NewInvoicePage() {
               </Chip>
               <Chip className="bg-white/12 text-white ring-white/15">
                 <Hash className="size-3.5 text-white/85" />
-                {invoiceNo || "—"}
+                {invoiceNo || "â€”"}
               </Chip>
               <Chip className="bg-white/12 text-white ring-white/15">
                 <Calendar className="size-3.5 text-white/85" />
@@ -776,11 +752,11 @@ export default function NewInvoicePage() {
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <Chip className="bg-white text-slate-700 ring-white/80">
                 <Command className="size-3.5 text-slate-500" />
-                ⌘K Customer
+                âŒ˜K Customer
               </Chip>
-              <Chip className="bg-white text-slate-700 ring-white/80">⌥N Add Row</Chip>
-              <Chip className="bg-white text-slate-700 ring-white/80">⌘S Save</Chip>
-              <Chip className="bg-white text-slate-700 ring-white/80">⌘↵ Issue</Chip>
+              <Chip className="bg-white text-slate-700 ring-white/80">âŒ¥N Add Row</Chip>
+              <Chip className="bg-white text-slate-700 ring-white/80">âŒ˜S Save</Chip>
+              <Chip className="bg-white text-slate-700 ring-white/80">âŒ˜â†µ Issue</Chip>
             </div>
           </div>
         </div>
@@ -857,7 +833,7 @@ export default function NewInvoicePage() {
                   </div>
                 </div>
                 <Chip tone="orange" className="px-2.5 py-1">
-                  ⌘K
+                  âŒ˜K
                 </Chip>
               </div>
             </div>
@@ -929,7 +905,7 @@ export default function NewInvoicePage() {
                         <div className="px-4 py-4 text-sm text-slate-600">No customers found.</div>
                       ) : (
                         filteredCustomers.map((c, idx) => {
-                          const name = c.name ?? c.customer_name ?? "—";
+                          const name = c.name ?? c.customer_name ?? "â€”";
                           const active = idx === custActiveIdx;
 
                           return (
@@ -948,7 +924,7 @@ export default function NewInvoicePage() {
                                 <div className="min-w-0">
                                   <div className="truncate text-sm font-semibold text-slate-900">{name}</div>
                                   <div className="mt-0.5 truncate text-xs text-slate-600">
-                                    {c.address ? c.address : "—"}
+                                    {c.address ? c.address : "â€”"}
                                   </div>
                                 </div>
                                 <div className="shrink-0 text-right text-xs text-slate-500">
@@ -1176,9 +1152,9 @@ You can also add phases, materials, quotation reference, and special notes here.
                     <div className="text-lg font-extrabold text-slate-900">KS CONTRACTING LTD</div>
                     <div className="mt-1 text-xs text-slate-600">MORCELLEMENT CARLOS, TAMARIN</div>
                     <div className="text-xs text-slate-600">
-                      Tel: 59416756 • Email: ks.contracting@hotmail.com
+                      Tel: 59416756 â€¢ Email: ks.contracting@hotmail.com
                     </div>
-                    <div className="text-xs text-slate-600">BRN: 18160190 • VAT: 27658608</div>
+                    <div className="text-xs text-slate-600">BRN: C18160190 â€¢ VAT: 27658608</div>
                   </div>
 
                   <div className="px-4 py-4">
@@ -1188,7 +1164,7 @@ You can also add phases, materials, quotation reference, and special notes here.
                       </div>
                       <div className="text-right text-sm">
                         <div className="font-semibold text-slate-500">No.</div>
-                        <div className="text-xl font-extrabold text-slate-900">{invoiceNo || "—"}</div>
+                        <div className="text-xl font-extrabold text-slate-900">{invoiceNo || "â€”"}</div>
                       </div>
                     </div>
 
@@ -1196,28 +1172,28 @@ You can also add phases, materials, quotation reference, and special notes here.
                       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                         <div>
                           <div className="text-xs text-slate-500">Name</div>
-                          <div className="font-semibold text-slate-900">{customerName || "—"}</div>
+                          <div className="font-semibold text-slate-900">{customerName || "â€”"}</div>
                         </div>
                         <div>
                           <div className="text-xs text-slate-500">Date</div>
-                          <div className="font-semibold text-slate-900">{fmtDate(invoiceDate) || "—"}</div>
+                          <div className="font-semibold text-slate-900">{fmtDate(invoiceDate) || "â€”"}</div>
                         </div>
                       </div>
 
                       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                         <div>
                           <div className="text-xs text-slate-500">Client's VAT Reg. No.</div>
-                          <div className="font-semibold text-slate-900">{customerVat || "—"}</div>
+                          <div className="font-semibold text-slate-900">{customerVat || "â€”"}</div>
                         </div>
                         <div>
                           <div className="text-xs text-slate-500">Client's BRN No.</div>
-                          <div className="font-semibold text-slate-900">{customerBrn || "—"}</div>
+                          <div className="font-semibold text-slate-900">{customerBrn || "â€”"}</div>
                         </div>
                       </div>
 
                       <div>
                         <div className="text-xs text-slate-500">Site Address</div>
-                        <div className="font-semibold text-slate-900">{siteAddress || "—"}</div>
+                        <div className="font-semibold text-slate-900">{siteAddress || "â€”"}</div>
                       </div>
                     </div>
 
@@ -1232,10 +1208,10 @@ You can also add phases, materials, quotation reference, and special notes here.
                         {rows.map((r) => (
                           <div key={r.id} className="grid grid-cols-12 px-3 py-3 text-xs">
                             <div className="col-span-2 font-semibold text-slate-800">
-                              {String(r.qty).trim() ? r.qty : "—"}
+                              {String(r.qty).trim() ? r.qty : "â€”"}
                             </div>
                             <div className="col-span-7 whitespace-pre-wrap break-words text-slate-800">
-                              {r.description || "—"}
+                              {r.description || "â€”"}
                             </div>
                             <div className="col-span-3 text-right font-bold text-slate-900">
                               {money(qtyForCalc(r.qty) * n2(r.price))}
@@ -1263,7 +1239,7 @@ You can also add phases, materials, quotation reference, and special notes here.
                     <div className="mt-5 rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-200">
                       <div className="text-xs font-semibold text-slate-700">Payment Reference</div>
                       <div className="mt-1 text-xs text-slate-600">
-                        Please use <span className="font-semibold text-slate-900">{invoiceNo || "—"}</span> as
+                        Please use <span className="font-semibold text-slate-900">{invoiceNo || "â€”"}</span> as
                         payment reference.
                       </div>
                       <div className="mt-1 text-xs text-slate-600">MCB 000446509687</div>
@@ -1278,3 +1254,6 @@ You can also add phases, materials, quotation reference, and special notes here.
     </div>
   );
 }
+
+
+

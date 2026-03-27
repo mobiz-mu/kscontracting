@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { createSupabaseServerClient, createSupabaseAdminClient } from "@/lib/supabase/server";
+import {
+  createSupabaseServerClient,
+  createSupabaseAdminClient,
+} from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -19,7 +22,9 @@ function safeError(err: any) {
 }
 
 function isUuid(v: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    v
+  );
 }
 
 export async function GET(_req: Request, ctx: RouteContext) {
@@ -34,7 +39,10 @@ export async function GET(_req: Request, ctx: RouteContext) {
     const { data: userRes, error: uErr } = await supabase.auth.getUser();
 
     if (uErr || !userRes.user) {
-      return jsonError(401, { error: "Unauthorized", supabaseError: safeError(uErr) });
+      return jsonError(401, {
+        error: "Unauthorized",
+        supabaseError: safeError(uErr),
+      });
     }
 
     const admin = createSupabaseAdminClient();
@@ -75,6 +83,7 @@ export async function GET(_req: Request, ctx: RouteContext) {
     }
 
     let customer: any = null;
+
     if (invoice.customer_id != null) {
       const { data: cust, error: custErr } = await admin
         .from("customers")
@@ -94,7 +103,9 @@ export async function GET(_req: Request, ctx: RouteContext) {
 
     const { data: items, error: itemsErr } = await admin
       .from("invoice_items")
-      .select("id, invoice_id, description, qty, unit_price_excl_vat, vat_rate, vat_amount, line_total")
+      .select(
+        "id, invoice_id, description, qty, unit_price_excl_vat, vat_rate, vat_amount, line_total"
+      )
       .eq("invoice_id", safeId)
       .order("id", { ascending: true });
 
@@ -110,18 +121,51 @@ export async function GET(_req: Request, ctx: RouteContext) {
         ok: true,
         data: {
           invoice: {
-            ...invoice,
+            id: invoice.id,
+            invoice_no: invoice.invoice_no,
+            invoice_type: invoice.invoice_type,
+            status: invoice.status,
+            invoice_date: invoice.invoice_date,
+            site_address: invoice.site_address,
+            notes: invoice.notes,
+            subtotal: invoice.subtotal ?? 0,
+            vat_amount: invoice.vat_amount ?? 0,
+            total_amount: invoice.total_amount ?? 0,
+            paid_amount: invoice.paid_amount ?? 0,
+            balance_amount: invoice.balance_amount ?? 0,
+            created_at: invoice.created_at,
+            issued_at: invoice.issued_at,
+            customer_id: invoice.customer_id,
+            created_by: invoice.created_by,
+
+            customer_name: customer?.name ?? null,
+            customer_address: customer?.address ?? null,
+            customer_brn: customer?.brn ?? null,
+            customer_vat: customer?.vat_no ?? null,
+
             customers: customer,
           },
-          items: items ?? [],
+          items: (items ?? []).map((item: any) => ({
+            id: item.id,
+            invoice_id: item.invoice_id,
+            description: item.description ?? "",
+            qty: Number(item.qty ?? 0),
+            unit_price_excl_vat: Number(item.unit_price_excl_vat ?? 0),
+            vat_rate: Number(item.vat_rate ?? 0.15),
+            vat_amount: Number(item.vat_amount ?? 0),
+            line_total: Number(item.line_total ?? 0),
+
+            price: Number(item.unit_price_excl_vat ?? 0),
+            total: Number(item.line_total ?? 0),
+          })),
         },
       },
       { status: 200 }
     );
-  } catch (e: any) {
+  } catch (err) {
     return jsonError(500, {
-      error: "Failed to load invoice",
-      details: e?.message ?? String(e),
+      error: "Unexpected server error",
+      supabaseError: safeError(err),
     });
   }
 }

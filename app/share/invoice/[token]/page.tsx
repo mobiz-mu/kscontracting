@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Download, FileText } from "lucide-react";
+import { Download, FileText, ShieldCheck } from "lucide-react";
 import { createSupabaseAdminClient } from "@/lib/supabase/server";
 import InvoiceKSDoc, { type KSInvoiceDocData } from "@/components/ksdoc/InvoiceKSDoc";
 
@@ -72,7 +72,16 @@ export default async function PublicInvoiceSharePage({
 
   const { data: items } = await admin
     .from("invoice_items")
-    .select("id, invoice_id, description, qty, unit_price_excl_vat, vat_rate, vat_amount, line_total")
+    .select(`
+      id,
+      invoice_id,
+      description,
+      qty,
+      unit_price_excl_vat,
+      vat_rate,
+      vat_amount,
+      line_total
+    `)
     .eq("invoice_id", invoice.id)
     .order("id", { ascending: true });
 
@@ -94,7 +103,7 @@ export default async function PublicInvoiceSharePage({
       addressLines: [
         "MORCELLEMENT CARLOS, TAMARIN",
         "Tel: 5941 6756 • Email: ks.contracting@hotmail.com",
-        "BRN: 18160190 • VAT: 27658608",
+        "BRN: C18160190 • VAT: 27658608",
       ],
     },
     doc: {
@@ -112,11 +121,11 @@ export default async function PublicInvoiceSharePage({
     },
     billTo: {
       name: customer?.name ?? "—",
-      lines: [
-        customer?.vat_no ? `Client VAT Reg. No.: ${customer.vat_no}` : "Client VAT Reg. No.:",
-        customer?.brn ? `Client BRN No.: ${customer.brn}` : "Client BRN No.:",
-        invoice.site_address ? `Site Address: ${invoice.site_address}` : "Site Address:",
-      ],
+      address: customer?.address ?? "",
+      brn: customer?.brn ?? "",
+      vat: customer?.vat_no ?? "",
+      siteAddress: invoice.site_address ?? "",
+      lines: invoice.site_address ? [`Site Address: ${invoice.site_address}`] : [],
     },
     items: (items ?? []).map((it: any) => ({
       id: String(it.id),
@@ -144,6 +153,10 @@ export default async function PublicInvoiceSharePage({
         <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
           <FileText className="h-4 w-4" />
           Invoice Viewer
+          <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
+            <ShieldCheck className="h-3.5 w-3.5" />
+            Secure Share Link
+          </span>
         </div>
 
         <Link
