@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { chromium } from "playwright";
+import chromium from "@sparticuz/chromium";
+import { chromium as playwright } from "playwright-core";
 
 export const runtime = "nodejs";
 
@@ -19,12 +20,15 @@ export async function GET(req: Request, ctx: RouteContext) {
   const reqUrl = new URL(req.url);
   const appUrl = reqUrl.origin;
 
-  let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null;
+  let browser: Awaited<ReturnType<typeof playwright.launch>> | null = null;
 
   try {
-    browser = await chromium.launch({
+    const executablePath = await chromium.executablePath();
+
+    browser = await playwright.launch({
+      executablePath,
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      args: chromium.args,
     });
 
     const page = await browser.newPage();
