@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
-import chromium from "@sparticuz/chromium";
+import chromium from "@sparticuz/chromium-min";
 import { chromium as playwright } from "playwright-core";
 
 export const runtime = "nodejs";
 
 type RouteContext = { params: Promise<{ token: string }> };
+
+const REMOTE_CHROMIUM_PACK =
+  "https://github.com/Sparticuz/chromium/releases/download/v138.0.2/chromium-v138.0.2-pack.x64.tar";
 
 export async function GET(req: Request, ctx: RouteContext) {
   const { token } = await ctx.params;
@@ -23,12 +26,12 @@ export async function GET(req: Request, ctx: RouteContext) {
   let browser: Awaited<ReturnType<typeof playwright.launch>> | null = null;
 
   try {
-    const executablePath = await chromium.executablePath();
+    const executablePath = await chromium.executablePath(REMOTE_CHROMIUM_PACK);
 
     browser = await playwright.launch({
       executablePath,
-      headless: true,
       args: chromium.args,
+      headless: true,
     });
 
     const page = await browser.newPage();
