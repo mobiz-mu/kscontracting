@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { chromium } from "playwright";
 
 export const runtime = "nodejs";
@@ -19,7 +19,7 @@ export async function GET(
   try {
     const page = await browser.newPage();
 
-    await page.goto(`${appUrl}/share/invoice/${token}`, {
+    await page.goto(`${appUrl}/public-invoice/${token}`, {
       waitUntil: "networkidle",
     });
 

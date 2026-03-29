@@ -352,7 +352,7 @@ export default function InvoiceDetailsPage() {
     try {
       const url = shareUrl || (await createShareLink());
       if (!url) return;
-      window.open(url.replace("/share/invoice/", "/api/public/invoice-pdf/"), "_blank", "noopener,noreferrer");
+      window.open(url.replace("/public-invoice/", "/api/public/invoice-pdf/"), "_blank", "noopener,noreferrer");
     } catch (e: any) {
       alert(e?.message || "Failed to open public PDF");
     }
@@ -363,7 +363,7 @@ export default function InvoiceDetailsPage() {
       if (!invoice || !hasId) return;
 
       const publicUrl = shareUrl || (await createShareLink());
-      const pdfUrl = publicUrl.replace("/share/invoice/", "/api/public/invoice-pdf/");
+      const pdfUrl = publicUrl.replace("/public-invoice/", "/api/public/invoice-pdf/");
 
       const message =
         `Hello,\n\n` +
@@ -385,7 +385,7 @@ export default function InvoiceDetailsPage() {
       if (!invoice || !hasId) return;
 
       const publicUrl = shareUrl || (await createShareLink());
-      const pdfUrl = publicUrl.replace("/share/invoice/", "/api/public/invoice-pdf/");
+      const pdfUrl = publicUrl.replace("/public-invoice/", "/api/public/invoice-pdf/");
       const emailSubject = `${invoiceTypeLabel(invoice.invoice_type)} - ${invoice.invoice_no} - KS Contracting Ltd`;
       const emailBody =
         `Hello,\n\n` +
@@ -678,3 +678,4 @@ export default function InvoiceDetailsPage() {
     </div>
   );
 }
+

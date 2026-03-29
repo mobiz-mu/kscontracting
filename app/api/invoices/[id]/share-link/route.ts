@@ -95,7 +95,7 @@ export async function POST(_req: Request, ctx: RouteContext) {
       ok: true,
       data: {
         token,
-        share_url: `${appUrl}/share/invoice/${token}`,
+        share_url: `${appUrl}/public-invoice/${token}`,
         invoice_no: invoice.invoice_no,
         expires_at: expiresAt.toISOString(),
       },
