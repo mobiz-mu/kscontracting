@@ -1,31 +1,53 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { chromium } from "playwright";
 
 export const runtime = "nodejs";
 
-export async function GET(
-  _req: Request,
-  ctx: { params: Promise<{ token: string }> }
-) {
-  const { token } = await ctx.params;
+type RouteContext = { params: Promise<{ token: string }> };
 
-  const appUrl =
-    process.env.NEXT_PUBLIC_APP_URL ||
-    process.env.APP_URL ||
-    "http://localhost:3000";
+export async function GET(req: Request, ctx: RouteContext) {
+  const { token } = await ctx.params;
+  const safeToken = String(token ?? "").trim();
+
+  if (!safeToken) {
+    return NextResponse.json(
+      { ok: false, error: "Missing token" },
+      { status: 400 }
+    );
+  }
+
+  const reqUrl = new URL(req.url);
+  const appUrl = reqUrl.origin;
 
   const browser = await chromium.launch({ headless: true });
 
   try {
     const page = await browser.newPage();
 
-    await page.goto(`${appUrl}/public-invoice/${token}`, {
+    const publicInvoiceUrl = `${appUrl}/public-invoice/${safeToken}`;
+
+    const response = await page.goto(publicInvoiceUrl, {
       waitUntil: "networkidle",
+      timeout: 60000,
     });
+
+    if (!response) {
+      throw new Error("No response received while opening public invoice page");
+    }
+
+    if (!response.ok()) {
+      throw new Error(`Public invoice page returned HTTP ${response.status()}`);
+    }
+
+    const finalUrl = page.url();
+    if (finalUrl.includes("/login")) {
+      throw new Error("Public invoice URL redirected to login");
+    }
 
     const pdf = await page.pdf({
       format: "A4",
       printBackground: true,
+      preferCSSPageSize: true,
       margin: {
         top: "8mm",
         right: "8mm",
@@ -34,18 +56,24 @@ export async function GET(
       },
     });
 
-    const body = new Uint8Array(pdf);
-
-    return new NextResponse(body, {
+    return new NextResponse(new Uint8Array(pdf), {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="invoice-${token}.pdf"`,
-        "Cache-Control": "private, no-store, max-age=0",
+        "Content-Disposition": `attachment; filename="invoice-${safeToken}.pdf"`,
+        "Cache-Control": "private, no-store, no-cache, must-revalidate",
       },
     });
+  } catch (error: any) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Failed to generate public invoice PDF",
+        details: error?.message ?? String(error),
+      },
+      { status: 500 }
+    );
   } finally {
     await browser.close();
   }
 }
-
