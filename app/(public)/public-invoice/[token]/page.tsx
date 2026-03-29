@@ -20,10 +20,15 @@ function invoiceTypeLabel(v?: string | null) {
 
 export default async function PublicInvoicePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ token: string }>;
+  searchParams: Promise<{ pdf?: string }>;
 }) {
   const { token } = await params;
+  const sp = await searchParams;
+  const isPdf = String(sp?.pdf ?? "") === "1";
+
   const admin = createSupabaseAdminClient();
 
   const { data: tokenRow, error: tokenErr } = await admin
@@ -150,6 +155,14 @@ export default async function PublicInvoicePage({
     notes: invoice.notes?.trim() || "",
     paymentTerms: "",
   };
+
+  if (isPdf) {
+    return (
+      <div className="bg-white">
+        <InvoiceKSDoc data={doc} variant="invoice" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-100 px-3 py-4 sm:px-6 sm:py-6">

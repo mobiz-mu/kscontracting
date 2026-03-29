@@ -36,10 +36,10 @@ export async function GET(req: Request, ctx: RouteContext) {
 
     const page = await browser.newPage();
 
-    const publicInvoiceUrl = `${appUrl}/public-invoice/${safeToken}`;
+    const publicInvoiceUrl = `${appUrl}/public-invoice/${safeToken}?pdf=1`;
 
     const response = await page.goto(publicInvoiceUrl, {
-      waitUntil: "domcontentloaded",
+      waitUntil: "networkidle",
       timeout: 60000,
     });
 
@@ -58,15 +58,31 @@ export async function GET(req: Request, ctx: RouteContext) {
 
     await page.emulateMedia({ media: "print" });
 
+    await page.waitForLoadState("networkidle");
+
+    await page.evaluate(async () => {
+      const images = Array.from(document.images);
+      await Promise.all(
+        images.map((img) => {
+          if (img.complete) return Promise.resolve();
+          return new Promise<void>((resolve) => {
+            const done = () => resolve();
+            img.addEventListener("load", done, { once: true });
+            img.addEventListener("error", done, { once: true });
+          });
+        })
+      );
+    });
+
     const pdf = await page.pdf({
       format: "A4",
       printBackground: true,
       preferCSSPageSize: true,
       margin: {
-        top: "8mm",
-        right: "8mm",
-        bottom: "8mm",
-        left: "8mm",
+        top: "0mm",
+        right: "0mm",
+        bottom: "0mm",
+        left: "0mm",
       },
     });
 
