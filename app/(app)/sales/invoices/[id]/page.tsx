@@ -535,17 +535,6 @@ export default function InvoiceDetailsPage() {
                 Refresh
               </Button>
 
-              <Link href={printPath} aria-disabled={!invoice || !hasId}>
-                <Button
-                  variant="outline"
-                  className="h-11 rounded-2xl border-white/20 bg-white/10 px-4 text-white backdrop-blur-sm hover:bg-white/16 hover:text-white"
-                  disabled={!invoice || !hasId}
-                >
-                  <Printer className="mr-2 size-4" />
-                  Staff Print
-                </Button>
-              </Link>
-
               <Button
                 onClick={issueInvoice}
                 disabled={!canIssue || issuing || !hasId}
@@ -678,4 +667,5 @@ export default function InvoiceDetailsPage() {
     </div>
   );
 }
+
 
