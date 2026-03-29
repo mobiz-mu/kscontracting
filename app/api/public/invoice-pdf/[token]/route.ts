@@ -34,12 +34,14 @@ export async function GET(req: Request, ctx: RouteContext) {
       headless: true,
     });
 
-    const page = await browser.newPage();
+    const page = await browser.newPage({
+      viewport: { width: 1400, height: 2000 },
+    });
 
     const publicInvoiceUrl = `${appUrl}/public-invoice/${safeToken}?pdf=1`;
 
     const response = await page.goto(publicInvoiceUrl, {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
       timeout: 60000,
     });
 
@@ -56,23 +58,28 @@ export async function GET(req: Request, ctx: RouteContext) {
       throw new Error("Public invoice URL redirected to login");
     }
 
-    await page.emulateMedia({ media: "print" });
-
-    await page.waitForLoadState("networkidle");
+    await page.waitForSelector(".ks-doc-root", {
+      timeout: 30000,
+    });
 
     await page.evaluate(async () => {
-      const images = Array.from(document.images);
-      await Promise.all(
-        images.map((img) => {
-          if (img.complete) return Promise.resolve();
-          return new Promise<void>((resolve) => {
-            const done = () => resolve();
-            img.addEventListener("load", done, { once: true });
-            img.addEventListener("error", done, { once: true });
-          });
-        })
-      );
+      const fontsReady =
+        "fonts" in document ? (document as any).fonts.ready : Promise.resolve();
+
+      const images = Array.from(document.images || []);
+      const imagePromises = images.map((img) => {
+        if (img.complete) return Promise.resolve();
+        return new Promise<void>((resolve) => {
+          const done = () => resolve();
+          img.addEventListener("load", done, { once: true });
+          img.addEventListener("error", done, { once: true });
+        });
+      });
+
+      await Promise.all([fontsReady, ...imagePromises]);
     });
+
+    await page.emulateMedia({ media: "print" });
 
     const pdf = await page.pdf({
       format: "A4",
