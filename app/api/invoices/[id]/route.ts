@@ -65,7 +65,11 @@ export async function GET(_req: Request, ctx: RouteContext) {
         created_at,
         issued_at,
         customer_id,
-        created_by
+        created_by,
+        customer_name,
+        customer_vat,
+        customer_brn,
+        customer_address
       `)
       .eq("id", safeId)
       .eq("created_by", userRes.user.id)
@@ -138,10 +142,10 @@ export async function GET(_req: Request, ctx: RouteContext) {
             customer_id: invoice.customer_id,
             created_by: invoice.created_by,
 
-            customer_name: customer?.name ?? null,
-            customer_address: customer?.address ?? null,
-            customer_brn: customer?.brn ?? null,
-            customer_vat: customer?.vat_no ?? null,
+            customer_name: (invoice as any).customer_name ?? customer?.name ?? null,
+            customer_address: (invoice as any).customer_address ?? customer?.address ?? null,
+            customer_brn: (invoice as any).customer_brn ?? customer?.brn ?? null,
+            customer_vat: (invoice as any).customer_vat ?? customer?.vat_no ?? null,
 
             customers: customer,
           },

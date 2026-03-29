@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import * as React from "react";
 import Link from "next/link";
@@ -41,6 +41,10 @@ type ApiInvoice = {
   created_at?: string | null;
   issued_at?: string | null;
   site_address?: string | null;
+  customer_name?: string | null;
+  customer_vat?: string | null;
+  customer_brn?: string | null;
+  customer_address?: string | null;
   customers?: {
     id?: string | number | null;
     name?: string | null;
@@ -333,8 +337,8 @@ export default function InvoicePrintPage() {
         signatureSrc: "/ks-signature.png",
         addressLines: [
           "MORCELLEMENT CARLOS, TAMARIN",
-          "Tel: 5941 6756 • Email: ks.contracting@hotmail.com",
-          "BRN: C18160190 • VAT: 27658608",
+          "Tel: 5941 6756 â€¢ Email: ks.contracting@hotmail.com",
+          "BRN: C18160190 â€¢ VAT: 27658608",
         ],
       },
       doc: {
@@ -561,7 +565,7 @@ export default function InvoicePrintPage() {
                 ) : (
                   <div className="print:hidden rounded-[28px] border border-slate-200 bg-white p-6 text-sm text-slate-600 shadow-[0_18px_60px_rgba(2,6,23,0.08)]">
                     {loading
-                      ? "Loading invoice…"
+                      ? "Loading invoiceâ€¦"
                       : hasId
                       ? "No document available."
                       : "Missing invoice id."}
@@ -576,11 +580,11 @@ export default function InvoicePrintPage() {
       <div className="mt-3 text-xs text-slate-400 print:hidden">
         {invoice ? (
           <>
-            Loaded: <span className="font-semibold">{invoice.invoice_no}</span> • Items:{" "}
+            Loaded: <span className="font-semibold">{invoice.invoice_no}</span> â€¢ Items:{" "}
             <span className="font-semibold">{items.length}</span>
           </>
         ) : (
-          "—"
+          "â€”"
         )}
       </div>
     </div>

@@ -73,11 +73,6 @@ function pad4(n: number) {
   return String(n).padStart(4, "0");
 }
 
-function parseQuoteNo(v: string) {
-  const m = String(v || "").match(/(\d{1,})$/);
-  return m ? Number(m[1]) : NaN;
-}
-
 async function safeGet<T>(url: string): Promise<T> {
   const res = await fetch(url, { cache: "no-store" });
   const ct = res.headers.get("content-type") || "";
@@ -278,7 +273,11 @@ export default function NewQuotationPage() {
       const json = await res.json();
 
       if (!res.ok) {
-        throw new Error(json?.error || "Failed to create quotation");
+        throw new Error(
+          json?.supabaseError?.message ||
+            json?.error ||
+            "Failed to create quotation"
+        );
       }
 
       router.push(`/sales/quotations/${json.data.quotation.id}`);
@@ -306,28 +305,32 @@ export default function NewQuotationPage() {
   }
 
   React.useEffect(() => {
-  let alive = true;
+    let alive = true;
 
-  (async () => {
     try {
-      const j = await safeGet<{ ok: boolean; data?: any }>("/api/settings/company");
-      const s = j?.data ?? {};
+      localStorage.removeItem("ks.quotation.lastNo");
+    } catch {}
 
-      const prefix = String(s.quote_prefix ?? "QTN").trim() || "QTN";
-      const nextNum = Math.max(1, Number(s.next_quote_no ?? 1) || 1);
+    (async () => {
+      try {
+        const j = await safeGet<{ ok: boolean; data?: any }>("/api/settings/company");
+        const s = j?.data ?? {};
 
-      if (!alive) return;
-      setQuotationNo(`${prefix}-${pad4(nextNum)}`);
-    } catch {
-      if (!alive) return;
-      setQuotationNo(`QTN-${pad4(1)}`);
-    }
-  })();
+        const prefix = String(s.quote_prefix ?? "QTN").trim() || "QTN";
+        const nextNum = Math.max(1, Number(s.next_quote_no ?? 1) || 1);
 
-  return () => {
-    alive = false;
-  };
-}, []);
+        if (!alive) return;
+        setQuotationNo(`${prefix}-${pad4(nextNum)}`);
+      } catch {
+        if (!alive) return;
+        setQuotationNo(`QTN-${pad4(1)}`);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   React.useEffect(() => {
     let alive = true;
@@ -391,7 +394,7 @@ export default function NewQuotationPage() {
 
                 <span className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-3 py-1 font-semibold ring-1 ring-slate-200">
                   <Hash className="size-3.5 text-slate-500" />
-                  {quotationNo || "â€”"}
+                  {quotationNo || "—"}
                 </span>
 
                 <span className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-3 py-1 font-semibold ring-1 ring-slate-200">
@@ -527,7 +530,7 @@ export default function NewQuotationPage() {
                   <div className="px-4 py-4 text-sm text-slate-600">No customers found.</div>
                 ) : (
                   filteredCustomers.map((c, idx) => {
-                    const name = c.name ?? c.customer_name ?? "â€”";
+                    const name = c.name ?? c.customer_name ?? "—";
                     const active = idx === custActiveIdx;
 
                     return (
@@ -546,7 +549,7 @@ export default function NewQuotationPage() {
                           <div className="min-w-0">
                             <div className="truncate text-sm font-semibold text-slate-900">{name}</div>
                             <div className="mt-0.5 truncate text-xs text-slate-600">
-                              {c.address ? c.address : "â€”"}
+                              {c.address ? c.address : "—"}
                             </div>
                           </div>
                           <div className="shrink-0 text-right text-xs text-slate-500">
@@ -729,5 +732,3 @@ export default function NewQuotationPage() {
     </div>
   );
 }
-
-

@@ -35,6 +35,10 @@ function normalizeStatus(v: any) {
   return "DRAFT";
 }
 
+function pad4(n: number) {
+  return String(n).padStart(4, "0");
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
@@ -134,14 +138,35 @@ export async function POST(req: Request) {
     const vatAmount = round2(subtotal * vatRate);
     const totalAmount = round2(subtotal + vatAmount);
 
-    const incomingQuoteNo =
+    let resolvedQuoteNo =
       typeof body.quote_no === "string" ? body.quote_no.trim() : "";
-
-    const incomingQuotationNo =
+    let resolvedQuotationNo =
       typeof body.quotation_no === "string" ? body.quotation_no.trim() : "";
 
-    const resolvedQuoteNo = incomingQuoteNo || incomingQuotationNo || null;
-    const resolvedQuotationNo = incomingQuotationNo || incomingQuoteNo || null;
+    if (!quotationId) {
+      const { data: settings, error: settingsErr } = await admin
+        .from("company_settings")
+        .select("id, quote_prefix, next_quote_no")
+        .limit(1)
+        .single();
+
+      if (settingsErr || !settings) {
+        return jsonError(500, {
+          error: "Failed to load company settings for quotation number",
+          supabaseError: safeError(settingsErr),
+        });
+      }
+
+      const prefix = String(settings.quote_prefix ?? "QTN").trim() || "QTN";
+      const nextNum = Math.max(1, Number(settings.next_quote_no ?? 1) || 1);
+      const serverQuoteNo = `${prefix}-${pad4(nextNum)}`;
+
+      resolvedQuoteNo = serverQuoteNo;
+      resolvedQuotationNo = serverQuoteNo;
+    } else {
+      resolvedQuoteNo = resolvedQuoteNo || resolvedQuotationNo || null;
+      resolvedQuotationNo = resolvedQuotationNo || resolvedQuoteNo || null;
+    }
 
     const quotationPayload = {
       quote_no: resolvedQuoteNo,
@@ -202,6 +227,22 @@ export async function POST(req: Request) {
       }
 
       savedQuote = data;
+
+      const currentNo =
+        Number(String(savedQuote.quote_no ?? "").match(/(\d+)$/)?.[1] ?? 1) || 1;
+
+      const { error: settingsUpdateErr } = await admin
+        .from("company_settings")
+        .update({ next_quote_no: currentNo + 1 })
+        .eq("id", 1);
+
+      if (settingsUpdateErr) {
+        return jsonError(500, {
+          error: "Quotation created but failed to advance quotation counter",
+          quotation_id: savedQuote.id,
+          supabaseError: safeError(settingsUpdateErr),
+        });
+      }
     } else {
       const { data, error } = await admin
         .from("quotations")

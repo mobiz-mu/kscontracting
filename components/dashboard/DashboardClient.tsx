@@ -188,7 +188,7 @@ function fmtDateTime(v?: Date | null) {
   const yyyy = d.getFullYear();
   const hh = String(d.getHours()).padStart(2, "0");
   const mi = String(d.getMinutes()).padStart(2, "0");
-  return `${dd}/${mm}/${yyyy} â€¢ ${hh}:${mi}`;
+  return `${dd}/${mm}/${yyyy}  •  ${hh}:${mi}`;
 }
 
 function startOfMonth(d: Date) {
@@ -751,7 +751,7 @@ export default function DashboardClient() {
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <div suppressHydrationWarning className="rounded-2xl bg-white/10 px-3 py-2 text-xs font-semibold text-white ring-1 ring-white/15">
-                {lastSync || "—"}
+                {lastSync || "-"}
               </div>
               <Button
                 onClick={() => void load()}
@@ -1234,7 +1234,7 @@ export default function DashboardClient() {
       <ShellCard className="p-4 sm:p-5">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-sm font-extrabold tracking-tight text-slate-950">Top Due Customers</div>
-          <div className="text-xs font-semibold text-slate-500">{lastSync || "—"}</div>
+          <div className="text-xs font-semibold text-slate-500">{lastSync || "-"}</div>
         </div>
 
         <div className="mt-3 overflow-hidden rounded-2xl border border-slate-200">
@@ -1314,3 +1314,5 @@ export default function DashboardClient() {
     </div>
   );
 }
+
+
