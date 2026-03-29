@@ -24,6 +24,8 @@ import {
   ArrowUpRight,
   Link2,
   Download,
+  ShieldCheck,
+  ExternalLink,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -57,6 +59,10 @@ type ApiInvoice = {
   created_at?: string | null;
   issued_at?: string | null;
   site_address?: string | null;
+  customer_name?: string | null;
+  customer_vat?: string | null;
+  customer_brn?: string | null;
+  customer_address?: string | null;
   customers?: ApiCustomer;
 };
 
@@ -364,14 +370,14 @@ export default function InvoiceDetailsPage() {
       const j = await safeJson<ShareLinkResponse>(res);
 
       if (!j.ok || !j.data?.share_url) {
-        throw new Error(j?.error?.message ?? j?.error ?? "Failed to create private share link");
+        throw new Error(j?.error?.message ?? j?.error ?? "Failed to create public secure invoice link");
       }
 
       setShareUrl(j.data.share_url);
       setShareExpiresAt(j.data.expires_at ?? "");
       return j.data.share_url;
     } catch (e: any) {
-      const message = e?.message || "Failed to create private share link";
+      const message = e?.message || "Failed to create public secure invoice link";
       setErr(message);
       throw new Error(message);
     } finally {
@@ -386,11 +392,33 @@ export default function InvoiceDetailsPage() {
       if (!url) return;
 
       await navigator.clipboard.writeText(url);
-      alert("Private invoice link copied.");
+      alert("Public secure invoice link copied.");
     } catch (e: any) {
-      alert(e?.message || "Failed to copy share link");
+      alert(e?.message || "Failed to copy public invoice link");
     } finally {
       setCopyingShare(false);
+    }
+  }, [createShareLink, shareUrl]);
+
+  const openPublicInvoice = React.useCallback(async () => {
+    try {
+      const url = shareUrl || (await createShareLink());
+      if (!url) return;
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (e: any) {
+      alert(e?.message || "Failed to open public invoice");
+    }
+  }, [createShareLink, shareUrl]);
+
+  const openPublicPdf = React.useCallback(async () => {
+    try {
+      const url = shareUrl || (await createShareLink());
+      if (!url) return;
+
+      const pdfUrl = url.replace("/share/invoice/", "/api/public/invoice-pdf/");
+      window.open(pdfUrl, "_blank", "noopener,noreferrer");
+    } catch (e: any) {
+      alert(e?.message || "Failed to open public PDF");
     }
   }, [createShareLink, shareUrl]);
 
@@ -398,20 +426,16 @@ export default function InvoiceDetailsPage() {
     try {
       if (!invoice || !hasId) return;
 
-      const privateUrl = shareUrl || (await createShareLink());
+      const publicUrl = shareUrl || (await createShareLink());
 
-      const message = `Hello,
-
-Please find your ${invoiceTypeLabel(invoice.invoice_type)} from KS Contracting Ltd.
-Invoice No: ${invoice.invoice_no}
-Amount: ${money(invoice.total_amount)}
-
-View invoice:
-${privateUrl}
-
-You can also download the PDF from the same page.
-
-Thank you.`;
+      const message =
+        `Hello,\n\n` +
+        `Please find your ${invoiceTypeLabel(invoice.invoice_type)} from KS Contracting Ltd.\n` +
+        `Invoice No: ${invoice.invoice_no}\n` +
+        `Amount: ${money(invoice.total_amount)}\n\n` +
+        `View invoice:\n${publicUrl}\n\n` +
+        `Download PDF:\n${publicUrl.replace("/share/invoice/", "/api/public/invoice-pdf/")}\n\n` +
+        `This secure link only allows invoice viewing and PDF download.`;
 
       window.open(
         `https://wa.me/?text=${encodeURIComponent(message)}`,
@@ -427,21 +451,19 @@ Thank you.`;
     try {
       if (!invoice || !hasId) return;
 
-      const privateUrl = shareUrl || (await createShareLink());
+      const publicUrl = shareUrl || (await createShareLink());
+      const pdfUrl = publicUrl.replace("/share/invoice/", "/api/public/invoice-pdf/");
 
       const emailSubject = `${invoiceTypeLabel(invoice.invoice_type)} - ${invoice.invoice_no} - KS Contracting Ltd`;
-      const emailBody = `Hello,
-
-Please find your ${invoiceTypeLabel(invoice.invoice_type)} from KS Contracting Ltd.
-Invoice No: ${invoice.invoice_no}
-Amount: ${money(invoice.total_amount)}
-
-View invoice:
-${privateUrl}
-
-You can also download the PDF from the same page.
-
-Thank you.`;
+      const emailBody =
+        `Hello,\n\n` +
+        `Please find your ${invoiceTypeLabel(invoice.invoice_type)} from KS Contracting Ltd.\n` +
+        `Invoice No: ${invoice.invoice_no}\n` +
+        `Amount: ${money(invoice.total_amount)}\n\n` +
+        `View invoice:\n${publicUrl}\n\n` +
+        `Download PDF:\n${pdfUrl}\n\n` +
+        `This secure link only allows invoice viewing and PDF download.\n\n` +
+        `Thank you.`;
 
       window.location.href = `mailto:?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
     } catch (e: any) {
@@ -487,12 +509,14 @@ Thank you.`;
   const canIssue = !!invoice && statusKey === "DRAFT";
 
   const cust = invoice?.customers ?? null;
+  const displayCustomerName = invoice?.customer_name ?? cust?.name ?? "—";
+  const displayCustomerAddress = invoice?.customer_address ?? cust?.address ?? "No customer address";
+  const displayCustomerVat = invoice?.customer_vat ?? cust?.vat_no ?? "";
+  const displayCustomerBrn = invoice?.customer_brn ?? cust?.brn ?? "";
+
   const invoiceType = invoiceTypeLabel(invoice?.invoice_type);
 
   const printPath = hasId ? `/sales/invoices/${id}/print` : "#";
-  const pdfDownloadPath = shareUrl
-    ? shareUrl.replace("/share/invoice/", "/api/public/invoice-pdf/")
-    : "";
 
   return (
     <div className="space-y-5">
@@ -551,13 +575,7 @@ Thank you.`;
               </h1>
 
               <div className="mt-2 text-sm text-blue-50/90 sm:text-[15px]">
-                {cust?.name ? (
-                  <>
-                    Customer: <span className="font-bold text-white">{cust.name}</span>
-                  </>
-                ) : (
-                  "Customer: —"
-                )}
+                Customer: <span className="font-bold text-white">{displayCustomerName}</span>
               </div>
 
               <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-blue-50/85">
@@ -580,8 +598,8 @@ Thank you.`;
 
                 {shareExpiresAt ? (
                   <span className="inline-flex items-center gap-2">
-                    <Link2 className="size-4 text-blue-100/80" />
-                    Private link expires: <span className="font-semibold text-white">{fmtDate(shareExpiresAt)}</span>
+                    <ShieldCheck className="size-4 text-blue-100/80" />
+                    Public link expires: <span className="font-semibold text-white">{fmtDate(shareExpiresAt)}</span>
                   </span>
                 ) : null}
               </div>
@@ -605,7 +623,7 @@ Thank you.`;
                   disabled={!invoice || !hasId}
                 >
                   <Printer className="mr-2 size-4" />
-                  Print / PDF
+                  Staff Print
                 </Button>
               </Link>
 
@@ -840,22 +858,22 @@ Thank you.`;
             </div>
 
             <div className="space-y-4 p-4 sm:p-5">
-              <InfoRow icon={Building2} label="Customer" value={cust?.name ?? "—"} />
-              <InfoRow icon={MapPin} label="Address" value={cust?.address ?? "No customer address"} />
+              <InfoRow icon={Building2} label="Customer" value={displayCustomerName} />
+              <InfoRow icon={MapPin} label="Address" value={displayCustomerAddress} />
 
               {invoice?.site_address ? (
                 <InfoRow icon={MapPin} label="Site Address" value={invoice.site_address} />
               ) : null}
 
-              {cust?.vat_no ? (
-                <InfoRow icon={Percent} label="Client VAT No." value={cust.vat_no} />
+              {displayCustomerVat ? (
+                <InfoRow icon={Percent} label="Client VAT No." value={displayCustomerVat} />
               ) : null}
 
-              {cust?.brn ? (
-                <InfoRow icon={Hash} label="Client BRN No." value={cust.brn} />
+              {displayCustomerBrn ? (
+                <InfoRow icon={Hash} label="Client BRN No." value={displayCustomerBrn} />
               ) : null}
 
-              {!cust?.vat_no && !cust?.brn ? (
+              {!displayCustomerVat && !displayCustomerBrn ? (
                 <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-200">
                   No VAT or BRN on customer profile.
                 </div>
@@ -867,52 +885,45 @@ Thank you.`;
             <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-base font-bold tracking-tight text-slate-950">Actions</div>
-                  <div className="mt-1 text-sm text-slate-600">Print, issue, share and collect</div>
+                  <div className="text-base font-bold tracking-tight text-slate-950">Client Share Actions</div>
+                  <div className="mt-1 text-sm text-slate-600">Public invoice view and real PDF only</div>
                 </div>
-                {invoice?.status ? (
-                  <Badge variant="secondary" className={cn("rounded-full border", statusStyle(invoice.status))}>
-                    {String(invoice.status).replaceAll("_", " ")}
-                  </Badge>
-                ) : null}
+                <Badge variant="secondary" className="rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">
+                  Public Secure
+                </Badge>
               </div>
             </div>
 
             <div className="space-y-3 p-4 sm:p-5">
-              <Link href={printPath} aria-disabled={!invoice || !hasId}>
-                <Button
-                  className="h-11 w-full rounded-2xl bg-[#071b38] text-white shadow-[0_16px_40px_rgba(7,27,56,0.18)] hover:bg-[#0a2750]"
-                  disabled={!invoice || !hasId}
-                >
-                  <Printer className="mr-2 size-4" />
-                  Print / Save PDF
-                </Button>
-              </Link>
-
               <Button
-                className="h-11 w-full rounded-2xl bg-[#ff8a1e] text-white shadow-[0_18px_44px_rgba(255,138,30,0.24)] hover:bg-[#f07c0f]"
-                onClick={issueInvoice}
-                disabled={!canIssue || issuing || !hasId}
-                title={!canIssue ? "Only Draft invoices can be issued" : "Issue invoice"}
+                type="button"
+                variant="outline"
+                className="h-11 w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
+                disabled={!invoice || !hasId || creatingShare}
+                onClick={openPublicInvoice}
               >
-                {issuing ? <RefreshCw className="mr-2 size-4 animate-spin" /> : <Send className="mr-2 size-4" />}
-                Issue Invoice
+                {creatingShare ? (
+                  <RefreshCw className="mr-2 size-4 animate-spin" />
+                ) : (
+                  <ExternalLink className="mr-2 size-4" />
+                )}
+                Open Public Invoice
               </Button>
 
-              <Link
-                href={hasId ? `/sales/payments/new?invoiceId=${encodeURIComponent(id)}&invoiceNo=${encodeURIComponent(invoice?.invoice_no || "")}&amount=${encodeURIComponent(String(balance))}` : "#"}
-                aria-disabled={!invoice || !hasId || balance <= 0}
+              <Button
+                type="button"
+                variant="outline"
+                className="h-11 w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
+                disabled={!invoice || !hasId || creatingShare}
+                onClick={openPublicPdf}
               >
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-11 w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
-                  disabled={!invoice || !hasId || balance <= 0}
-                >
-                  <Wallet className="mr-2 size-4" />
-                  Add Payment
-                </Button>
-              </Link>
+                {creatingShare ? (
+                  <RefreshCw className="mr-2 size-4 animate-spin" />
+                ) : (
+                  <Download className="mr-2 size-4" />
+                )}
+                Open Public PDF
+              </Button>
 
               <Button
                 type="button"
@@ -956,31 +967,67 @@ Thank you.`;
                 ) : (
                   <Link2 className="mr-2 size-4" />
                 )}
-                Copy Private Link
+                Copy Public Secure Link
               </Button>
 
               {shareUrl ? (
-                <a href={pdfDownloadPath} target="_blank" rel="noreferrer">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-11 w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
-                  >
-                    <Download className="mr-2 size-4" />
-                    Download Real PDF
-                  </Button>
-                </a>
+                <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800 ring-1 ring-emerald-200">
+                  This link only allows invoice viewing and real PDF download.
+                </div>
               ) : null}
+            </div>
+          </Surface>
+
+          <Surface>
+            <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-base font-bold tracking-tight text-slate-950">Internal Staff Actions</div>
+                  <div className="mt-1 text-sm text-slate-600">Private back-office controls</div>
+                </div>
+                {invoice?.status ? (
+                  <Badge variant="secondary" className={cn("rounded-full border", statusStyle(invoice.status))}>
+                    {String(invoice.status).replaceAll("_", " ")}
+                  </Badge>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="space-y-3 p-4 sm:p-5">
+              <Link href={printPath} aria-disabled={!invoice || !hasId}>
+                <Button
+                  className="h-11 w-full rounded-2xl bg-[#071b38] text-white shadow-[0_16px_40px_rgba(7,27,56,0.18)] hover:bg-[#0a2750]"
+                  disabled={!invoice || !hasId}
+                >
+                  <Printer className="mr-2 size-4" />
+                  Staff Print / Save PDF
+                </Button>
+              </Link>
 
               <Button
-                variant="outline"
-                className="h-11 w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
-                onClick={() => window.open(printPath, "_blank", "noopener,noreferrer")}
-                disabled={!invoice || !hasId}
+                className="h-11 w-full rounded-2xl bg-[#ff8a1e] text-white shadow-[0_18px_44px_rgba(255,138,30,0.24)] hover:bg-[#f07c0f]"
+                onClick={issueInvoice}
+                disabled={!canIssue || issuing || !hasId}
+                title={!canIssue ? "Only Draft invoices can be issued" : "Issue invoice"}
               >
-                <ArrowUpRight className="mr-2 size-4" />
-                Open Print in New Tab
+                {issuing ? <RefreshCw className="mr-2 size-4 animate-spin" /> : <Send className="mr-2 size-4" />}
+                Issue Invoice
               </Button>
+
+              <Link
+                href={hasId ? `/sales/payments/new?invoiceId=${encodeURIComponent(id)}&invoiceNo=${encodeURIComponent(invoice?.invoice_no || "")}&amount=${encodeURIComponent(String(balance))}` : "#"}
+                aria-disabled={!invoice || !hasId || balance <= 0}
+              >
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
+                  disabled={!invoice || !hasId || balance <= 0}
+                >
+                  <Wallet className="mr-2 size-4" />
+                  Add Payment
+                </Button>
+              </Link>
 
               <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
                 <div className="flex items-center justify-between gap-3">

@@ -51,7 +51,11 @@ export default async function PublicInvoiceSharePage({
       total_amount,
       paid_amount,
       balance_amount,
-      customer_id
+      customer_id,
+      customer_name,
+      customer_vat,
+      customer_brn,
+      customer_address
     `)
     .eq("id", tokenRow.invoice_id)
     .single();
@@ -120,10 +124,10 @@ export default async function PublicInvoiceSharePage({
       dueDate: "",
     },
     billTo: {
-      name: customer?.name ?? "—",
-      address: customer?.address ?? "",
-      brn: customer?.brn ?? "",
-      vat: customer?.vat_no ?? "",
+      name: invoice.customer_name ?? customer?.name ?? "—",
+      address: invoice.customer_address ?? customer?.address ?? "",
+      brn: invoice.customer_brn ?? customer?.brn ?? "",
+      vat: invoice.customer_vat ?? customer?.vat_no ?? "",
       siteAddress: invoice.site_address ?? "",
       lines: invoice.site_address ? [`Site Address: ${invoice.site_address}`] : [],
     },
