@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import * as React from "react";
 import Link from "next/link";
@@ -21,7 +21,6 @@ import {
   Wallet,
   BadgeCheck,
   ReceiptText,
-  ArrowUpRight,
   Link2,
   Download,
   ShieldCheck,
@@ -31,10 +30,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-
-/* =========================
-   Types
-========================= */
 
 type ApiCustomer = {
   id?: string | number | null;
@@ -104,10 +99,6 @@ type ShareLinkResponse = {
   supabaseError?: any;
   details?: any;
 };
-
-/* =========================
-   Utils
-========================= */
 
 function n2(v: any) {
   const n = Number(v ?? 0);
@@ -182,30 +173,6 @@ async function safeJson<T>(res: Response): Promise<T> {
   return JSON.parse(raw) as T;
 }
 
-/* =========================
-   UI atoms
-========================= */
-
-function Chip({
-  children,
-  className,
-}: {
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold",
-        "bg-white/90 text-slate-700 ring-1 ring-white/70 backdrop-blur-sm",
-        className
-      )}
-    >
-      {children}
-    </span>
-  );
-}
-
 function Surface({
   children,
   className,
@@ -246,32 +213,13 @@ function StatBox({
 
   return (
     <div className={cn("rounded-[24px] p-4 ring-1 sm:p-5", tones[tone])}>
-      <div
-        className={cn(
-          "text-[10px] font-bold uppercase tracking-[0.18em]",
-          tone === "navy" || tone === "orange" ? "text-white/70" : "text-slate-500"
-        )}
-      >
+      <div className={cn("text-[10px] font-bold uppercase tracking-[0.18em]", tone === "navy" || tone === "orange" ? "text-white/70" : "text-slate-500")}>
         {label}
       </div>
-      <div
-        className={cn(
-          "mt-2 text-[22px] font-extrabold tracking-tight sm:text-[24px]",
-          tone === "navy" || tone === "orange" ? "text-white" : "text-slate-950"
-        )}
-      >
+      <div className={cn("mt-2 text-[22px] font-extrabold tracking-tight sm:text-[24px]", tone === "navy" || tone === "orange" ? "text-white" : "text-slate-950")}>
         {value}
       </div>
-      {sub ? (
-        <div
-          className={cn(
-            "mt-1 text-xs",
-            tone === "navy" || tone === "orange" ? "text-white/75" : "text-slate-600"
-          )}
-        >
-          {sub}
-        </div>
-      ) : null}
+      {sub ? <div className={cn("mt-1 text-xs", tone === "navy" || tone === "orange" ? "text-white/75" : "text-slate-600")}>{sub}</div> : null}
     </div>
   );
 }
@@ -291,18 +239,12 @@ function InfoRow({
         <Icon className="size-4 text-slate-500" />
       </div>
       <div className="min-w-0">
-        <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
-          {label}
-        </div>
+        <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">{label}</div>
         <div className="mt-1 break-words text-sm font-semibold text-slate-900">{value}</div>
       </div>
     </div>
   );
 }
-
-/* =========================
-   Page
-========================= */
 
 export default function InvoiceDetailsPage() {
   const params = useParams();
@@ -363,10 +305,7 @@ export default function InvoiceDetailsPage() {
     setErr("");
 
     try {
-      const res = await fetch(`/api/invoices/${id}/share-link`, {
-        method: "POST",
-      });
-
+      const res = await fetch(`/api/invoices/${id}/share-link`, { method: "POST" });
       const j = await safeJson<ShareLinkResponse>(res);
 
       if (!j.ok || !j.data?.share_url) {
@@ -390,7 +329,6 @@ export default function InvoiceDetailsPage() {
       setCopyingShare(true);
       const url = shareUrl || (await createShareLink());
       if (!url) return;
-
       await navigator.clipboard.writeText(url);
       alert("Public secure invoice link copied.");
     } catch (e: any) {
@@ -414,9 +352,7 @@ export default function InvoiceDetailsPage() {
     try {
       const url = shareUrl || (await createShareLink());
       if (!url) return;
-
-      const pdfUrl = url.replace("/share/invoice/", "/api/public/invoice-pdf/");
-      window.open(pdfUrl, "_blank", "noopener,noreferrer");
+      window.open(url.replace("/share/invoice/", "/api/public/invoice-pdf/"), "_blank", "noopener,noreferrer");
     } catch (e: any) {
       alert(e?.message || "Failed to open public PDF");
     }
@@ -427,6 +363,7 @@ export default function InvoiceDetailsPage() {
       if (!invoice || !hasId) return;
 
       const publicUrl = shareUrl || (await createShareLink());
+      const pdfUrl = publicUrl.replace("/share/invoice/", "/api/public/invoice-pdf/");
 
       const message =
         `Hello,\n\n` +
@@ -434,14 +371,10 @@ export default function InvoiceDetailsPage() {
         `Invoice No: ${invoice.invoice_no}\n` +
         `Amount: ${money(invoice.total_amount)}\n\n` +
         `View invoice:\n${publicUrl}\n\n` +
-        `Download PDF:\n${publicUrl.replace("/share/invoice/", "/api/public/invoice-pdf/")}\n\n` +
+        `Download PDF:\n${pdfUrl}\n\n` +
         `This secure link only allows invoice viewing and PDF download.`;
 
-      window.open(
-        `https://wa.me/?text=${encodeURIComponent(message)}`,
-        "_blank",
-        "noopener,noreferrer"
-      );
+      window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
     } catch (e: any) {
       alert(e?.message || "Failed to prepare WhatsApp invoice link");
     }
@@ -453,7 +386,6 @@ export default function InvoiceDetailsPage() {
 
       const publicUrl = shareUrl || (await createShareLink());
       const pdfUrl = publicUrl.replace("/share/invoice/", "/api/public/invoice-pdf/");
-
       const emailSubject = `${invoiceTypeLabel(invoice.invoice_type)} - ${invoice.invoice_no} - KS Contracting Ltd`;
       const emailBody =
         `Hello,\n\n` +
@@ -499,11 +431,7 @@ export default function InvoiceDetailsPage() {
   const subtotal = n2(invoice?.subtotal);
   const vat = n2(invoice?.vat_amount);
   const balance = n2(invoice?.balance_amount);
-
-  const paid =
-    typeof invoice?.paid_amount === "number" && Number.isFinite(invoice.paid_amount)
-      ? n2(invoice.paid_amount)
-      : Math.max(0, total - balance);
+  const paid = typeof invoice?.paid_amount === "number" && Number.isFinite(invoice.paid_amount) ? n2(invoice.paid_amount) : Math.max(0, total - balance);
 
   const statusKey = String(invoice?.status ?? "").toUpperCase();
   const canIssue = !!invoice && statusKey === "DRAFT";
@@ -515,7 +443,6 @@ export default function InvoiceDetailsPage() {
   const displayCustomerBrn = invoice?.customer_brn ?? cust?.brn ?? "";
 
   const invoiceType = invoiceTypeLabel(invoice?.invoice_type);
-
   const printPath = hasId ? `/sales/invoices/${id}/print` : "#";
 
   return (
@@ -523,7 +450,6 @@ export default function InvoiceDetailsPage() {
       <Surface className="overflow-hidden">
         <div className="absolute inset-0 bg-[linear-gradient(135deg,#071b38_0%,#0d2c59_48%,#163d73_100%)]" />
         <div className="absolute inset-0 opacity-80 bg-[radial-gradient(900px_320px_at_-10%_-20%,rgba(255,255,255,0.14),transparent_55%),radial-gradient(700px_300px_at_110%_0%,rgba(255,153,51,0.20),transparent_50%)]" />
-
         <div className="relative px-4 py-5 sm:px-6 sm:py-6 xl:px-7 xl:py-7">
           <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
             <div className="min-w-0">
@@ -538,40 +464,33 @@ export default function InvoiceDetailsPage() {
                 </Button>
 
                 {invoice?.status ? (
-                  <span
-                    className={cn(
-                      "inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-sm",
-                      statusStyle(invoice.status)
-                    )}
-                  >
+                  <span className={cn("inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-sm", statusStyle(invoice.status))}>
                     {String(invoice.status ?? "—").replaceAll("_", " ")}
                   </span>
-                ) : (
-                  <Chip className="bg-white/12 text-white ring-white/15">—</Chip>
-                )}
+                ) : null}
 
                 {invoice ? (
-                  <Chip className="bg-white/12 text-white ring-white/15">
+                  <span className="inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold bg-white/12 text-white ring-1 ring-white/15">
                     <FileText className="size-3.5 text-white/85" />
                     {invoiceType}
-                  </Chip>
+                  </span>
                 ) : null}
 
                 {lastSync ? (
-                  <Chip className="bg-white/12 text-white ring-white/15">
+                  <span className="inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold bg-white/12 text-white ring-1 ring-white/15">
                     <RefreshCw className="size-3.5 text-white/85" />
                     Synced {lastSync.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                  </Chip>
+                  </span>
                 ) : null}
 
-                <Chip className="bg-[#ff8a1e]/18 text-[#ffd6ad] ring-[#ffb266]/20">
+                <span className="inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold bg-[#ff8a1e]/18 text-[#ffd6ad] ring-1 ring-[#ffb266]/20">
                   <BadgeCheck className="size-3.5" />
                   KS Contracting
-                </Chip>
+                </span>
               </div>
 
               <h1 className="mt-3 text-2xl font-extrabold tracking-tight text-white sm:text-3xl xl:text-[2rem]">
-                {invoice?.invoice_no || (loading ? "Loading…" : hasId ? "Invoice Details" : "Missing invoice id")}
+                {invoice?.invoice_no || (loading ? "Loading..." : hasId ? "Invoice Details" : "Missing invoice id")}
               </h1>
 
               <div className="mt-2 text-sm text-blue-50/90 sm:text-[15px]">
@@ -631,7 +550,6 @@ export default function InvoiceDetailsPage() {
                 onClick={issueInvoice}
                 disabled={!canIssue || issuing || !hasId}
                 className="h-11 rounded-2xl bg-[#ff8a1e] px-5 font-semibold text-white shadow-[0_18px_44px_rgba(255,138,30,0.24)] hover:bg-[#f07c0f]"
-                title={!canIssue ? "Only Draft invoices can be issued" : "Issue invoice"}
               >
                 {issuing ? <RefreshCw className="mr-2 size-4 animate-spin" /> : <Send className="mr-2 size-4" />}
                 Issue & Print
@@ -655,12 +573,7 @@ export default function InvoiceDetailsPage() {
         <StatBox label="Sub Total" value={invoice ? money(subtotal) : "—"} />
         <StatBox label="VAT 15%" value={invoice ? money(vat) : "—"} />
         <StatBox label="Total" value={invoice ? money(total) : "—"} tone="navy" />
-        <StatBox
-          label="Balance"
-          value={invoice ? money(balance) : "—"}
-          tone={balance <= 0 ? "emerald" : "orange"}
-          sub={invoice ? (balance <= 0 ? "Settled" : "Outstanding") : undefined}
-        />
+        <StatBox label="Balance" value={invoice ? money(balance) : "—"} tone={balance <= 0 ? "emerald" : "orange"} sub={invoice ? (balance <= 0 ? "Settled" : "Outstanding") : undefined} />
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px] items-start">
@@ -669,85 +582,16 @@ export default function InvoiceDetailsPage() {
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-4 sm:px-5">
               <div className="min-w-0">
                 <div className="text-base font-bold tracking-tight text-slate-950">Invoice Items</div>
-                <div className="mt-1 text-sm text-slate-600">
-                  {invoice ? `${items.length} item(s) on this invoice` : "—"}
-                </div>
-              </div>
-
-              {invoice ? (
-                <Chip className="bg-slate-50 text-slate-700 ring-slate-200">
-                  <ReceiptText className="size-4 text-slate-500" />
-                  MUR
-                </Chip>
-              ) : null}
-            </div>
-
-            <div className="hidden md:block p-4 sm:p-5">
-              <div className="grid grid-cols-[minmax(0,1.8fr)_90px_150px_140px_160px] gap-3 rounded-2xl bg-slate-50 px-4 py-3">
-                <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Description</div>
-                <div className="text-right text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Qty</div>
-                <div className="text-right text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Unit Price</div>
-                <div className="text-right text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">VAT</div>
-                <div className="text-right text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Amount</div>
-              </div>
-
-              <div className="mt-3 space-y-3">
-                {loading ? (
-                  Array.from({ length: 5 }).map((_, i) => (
-                    <div
-                      key={i}
-                      className="grid animate-pulse grid-cols-[minmax(0,1.8fr)_90px_150px_140px_160px] gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-4"
-                    >
-                      <div className="h-4 w-4/5 rounded bg-slate-200" />
-                      <div className="ml-auto h-4 w-10 rounded bg-slate-200" />
-                      <div className="ml-auto h-4 w-24 rounded bg-slate-200" />
-                      <div className="ml-auto h-4 w-20 rounded bg-slate-200" />
-                      <div className="ml-auto h-4 w-28 rounded bg-slate-200" />
-                    </div>
-                  ))
-                ) : !invoice ? (
-                  <div className="rounded-2xl border border-slate-200 bg-white px-4 py-12 text-center text-slate-500">
-                    No invoice loaded.
-                  </div>
-                ) : items.length === 0 ? (
-                  <div className="rounded-2xl border border-slate-200 bg-white px-4 py-12 text-center text-slate-500">
-                    No items found for this invoice.
-                  </div>
-                ) : (
-                  items.map((it) => (
-                    <div
-                      key={String(it.id)}
-                      className="grid grid-cols-[minmax(0,1.8fr)_90px_150px_140px_160px] gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-4 transition hover:border-slate-300 hover:shadow-[0_12px_28px_rgba(15,23,42,0.05)]"
-                    >
-                      <div className="min-w-0">
-                        <div className="whitespace-pre-wrap break-words font-semibold text-slate-900">
-                          {it.description}
-                        </div>
-                      </div>
-                      <div className="text-right font-semibold text-slate-700">{n2(it.qty)}</div>
-                      <div className="text-right font-semibold text-slate-900">{money(it.unit_price_excl_vat)}</div>
-                      <div className="text-right font-semibold text-slate-900">{money(it.vat_amount)}</div>
-                      <div className="text-right font-extrabold text-slate-950">{money(it.line_total)}</div>
-                    </div>
-                  ))
-                )}
+                <div className="mt-1 text-sm text-slate-600">{invoice ? `${items.length} item(s) on this invoice` : "—"}</div>
               </div>
             </div>
 
-            <div className="md:hidden p-4">
+            <div className="p-4 sm:p-5">
               <div className="space-y-3">
                 {loading ? (
-                  Array.from({ length: 5 }).map((_, i) => (
-                    <div key={i} className="animate-pulse rounded-2xl border border-slate-200 bg-white p-4">
-                      <div className="h-4 w-3/4 rounded bg-slate-200" />
-                      <div className="mt-4 grid grid-cols-2 gap-3">
-                        <div className="h-14 rounded-2xl bg-slate-100" />
-                        <div className="h-14 rounded-2xl bg-slate-100" />
-                        <div className="h-14 rounded-2xl bg-slate-100" />
-                        <div className="h-14 rounded-2xl bg-slate-100" />
-                      </div>
-                    </div>
-                  ))
+                  <div className="rounded-2xl border border-slate-200 bg-white px-4 py-12 text-center text-slate-500">
+                    Loading...
+                  </div>
                 ) : !invoice ? (
                   <div className="rounded-2xl border border-slate-200 bg-white px-4 py-12 text-center text-slate-500">
                     No invoice loaded.
@@ -758,86 +602,17 @@ export default function InvoiceDetailsPage() {
                   </div>
                 ) : (
                   items.map((it) => (
-                    <div
-                      key={String(it.id)}
-                      className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_1px_0_rgba(15,23,42,0.04),0_12px_24px_rgba(15,23,42,0.05)]"
-                    >
-                      <div className="font-semibold text-slate-900 whitespace-pre-wrap break-words">
-                        {it.description}
-                      </div>
-
-                      <div className="mt-4 grid grid-cols-2 gap-3">
-                        <div className="rounded-2xl bg-slate-50 p-3">
-                          <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
-                            Qty
-                          </div>
-                          <div className="mt-1 font-bold text-slate-900">{n2(it.qty)}</div>
-                        </div>
-
-                        <div className="rounded-2xl bg-slate-50 p-3">
-                          <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
-                            Unit Price
-                          </div>
-                          <div className="mt-1 font-bold text-slate-900">{money(it.unit_price_excl_vat)}</div>
-                        </div>
-
-                        <div className="rounded-2xl bg-slate-50 p-3">
-                          <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
-                            VAT
-                          </div>
-                          <div className="mt-1 font-bold text-slate-900">{money(it.vat_amount)}</div>
-                        </div>
-
-                        <div className="rounded-2xl bg-[#071b38] p-3">
-                          <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/70">
-                            Amount
-                          </div>
-                          <div className="mt-1 font-extrabold text-white">{money(it.line_total)}</div>
-                        </div>
+                    <div key={String(it.id)} className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <div className="font-semibold text-slate-900 whitespace-pre-wrap break-words">{it.description}</div>
+                      <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div className="rounded-2xl bg-slate-50 p-3"><div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Qty</div><div className="mt-1 font-bold text-slate-900">{n2(it.qty)}</div></div>
+                        <div className="rounded-2xl bg-slate-50 p-3"><div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Unit Price</div><div className="mt-1 font-bold text-slate-900">{money(it.unit_price_excl_vat)}</div></div>
+                        <div className="rounded-2xl bg-slate-50 p-3"><div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">VAT</div><div className="mt-1 font-bold text-slate-900">{money(it.vat_amount)}</div></div>
+                        <div className="rounded-2xl bg-[#071b38] p-3"><div className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/70">Amount</div><div className="mt-1 font-extrabold text-white">{money(it.line_total)}</div></div>
                       </div>
                     </div>
                   ))
                 )}
-              </div>
-            </div>
-
-            <div className="border-t border-slate-200 bg-white px-4 py-4 sm:px-5">
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
-                <div className="text-sm text-slate-600">
-                  {invoice?.notes?.trim() ? (
-                    <>
-                      <span className="font-semibold text-slate-900">Notes:</span> {invoice.notes.trim()}
-                    </>
-                  ) : (
-                    <span className="text-slate-500">No additional notes on this invoice.</span>
-                  )}
-                </div>
-
-                <div className="w-full space-y-2 rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                  <div className="flex items-center justify-between text-sm text-slate-600">
-                    <span>Sub Total</span>
-                    <span className="font-semibold text-slate-900">{money(subtotal)}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm text-slate-600">
-                    <span>VAT 15%</span>
-                    <span className="font-semibold text-slate-900">{money(vat)}</span>
-                  </div>
-                  <div className="h-px bg-slate-200" />
-                  <div className="flex items-center justify-between text-base">
-                    <span className="font-semibold text-slate-700">Total</span>
-                    <span className="font-extrabold text-slate-950">{money(total)}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm text-slate-600">
-                    <span>Paid</span>
-                    <span className="font-semibold text-slate-900">{money(paid)}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm text-slate-600">
-                    <span>Balance</span>
-                    <span className={cn("font-extrabold", balance > 0 ? "text-slate-950" : "text-emerald-700")}>
-                      {money(balance)}
-                    </span>
-                  </div>
-                </div>
               </div>
             </div>
           </Surface>
@@ -846,38 +621,15 @@ export default function InvoiceDetailsPage() {
         <div className="space-y-4 xl:sticky xl:top-[92px]">
           <Surface>
             <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-base font-bold tracking-tight text-slate-950">Client Details</div>
-                  <div className="mt-1 text-sm text-slate-600">Customer and site information</div>
-                </div>
-                <div className="grid size-10 place-items-center rounded-2xl bg-slate-50 ring-1 ring-slate-200">
-                  <Building2 className="size-4 text-slate-500" />
-                </div>
-              </div>
+              <div className="text-base font-bold tracking-tight text-slate-950">Client Details</div>
             </div>
 
             <div className="space-y-4 p-4 sm:p-5">
               <InfoRow icon={Building2} label="Customer" value={displayCustomerName} />
               <InfoRow icon={MapPin} label="Address" value={displayCustomerAddress} />
-
-              {invoice?.site_address ? (
-                <InfoRow icon={MapPin} label="Site Address" value={invoice.site_address} />
-              ) : null}
-
-              {displayCustomerVat ? (
-                <InfoRow icon={Percent} label="Client VAT No." value={displayCustomerVat} />
-              ) : null}
-
-              {displayCustomerBrn ? (
-                <InfoRow icon={Hash} label="Client BRN No." value={displayCustomerBrn} />
-              ) : null}
-
-              {!displayCustomerVat && !displayCustomerBrn ? (
-                <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-200">
-                  No VAT or BRN on customer profile.
-                </div>
-              ) : null}
+              {invoice?.site_address ? <InfoRow icon={MapPin} label="Site Address" value={invoice.site_address} /> : null}
+              {displayCustomerVat ? <InfoRow icon={Percent} label="Client VAT No." value={displayCustomerVat} /> : null}
+              {displayCustomerBrn ? <InfoRow icon={Hash} label="Client BRN No." value={displayCustomerBrn} /> : null}
             </div>
           </Surface>
 
@@ -895,173 +647,30 @@ export default function InvoiceDetailsPage() {
             </div>
 
             <div className="space-y-3 p-4 sm:p-5">
-              <Button
-                type="button"
-                variant="outline"
-                className="h-11 w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
-                disabled={!invoice || !hasId || creatingShare}
-                onClick={openPublicInvoice}
-              >
-                {creatingShare ? (
-                  <RefreshCw className="mr-2 size-4 animate-spin" />
-                ) : (
-                  <ExternalLink className="mr-2 size-4" />
-                )}
+              <Button type="button" variant="outline" className="h-11 w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white" disabled={!invoice || !hasId || creatingShare} onClick={openPublicInvoice}>
+                {creatingShare ? <RefreshCw className="mr-2 size-4 animate-spin" /> : <ExternalLink className="mr-2 size-4" />}
                 Open Public Invoice
               </Button>
 
-              <Button
-                type="button"
-                variant="outline"
-                className="h-11 w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
-                disabled={!invoice || !hasId || creatingShare}
-                onClick={openPublicPdf}
-              >
-                {creatingShare ? (
-                  <RefreshCw className="mr-2 size-4 animate-spin" />
-                ) : (
-                  <Download className="mr-2 size-4" />
-                )}
+              <Button type="button" variant="outline" className="h-11 w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white" disabled={!invoice || !hasId || creatingShare} onClick={openPublicPdf}>
+                {creatingShare ? <RefreshCw className="mr-2 size-4 animate-spin" /> : <Download className="mr-2 size-4" />}
                 Open Public PDF
               </Button>
 
-              <Button
-                type="button"
-                variant="outline"
-                className="h-11 w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
-                disabled={!invoice || !hasId || creatingShare}
-                onClick={sendWhatsappInvoice}
-              >
-                {creatingShare ? (
-                  <RefreshCw className="mr-2 size-4 animate-spin" />
-                ) : (
-                  <MessageCircle className="mr-2 size-4" />
-                )}
+              <Button type="button" variant="outline" className="h-11 w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white" disabled={!invoice || !hasId || creatingShare} onClick={sendWhatsappInvoice}>
+                {creatingShare ? <RefreshCw className="mr-2 size-4 animate-spin" /> : <MessageCircle className="mr-2 size-4" />}
                 Send by WhatsApp
               </Button>
 
-              <Button
-                type="button"
-                variant="outline"
-                className="h-11 w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
-                disabled={!invoice || !hasId || creatingShare}
-                onClick={sendEmailInvoice}
-              >
-                {creatingShare ? (
-                  <RefreshCw className="mr-2 size-4 animate-spin" />
-                ) : (
-                  <Mail className="mr-2 size-4" />
-                )}
+              <Button type="button" variant="outline" className="h-11 w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white" disabled={!invoice || !hasId || creatingShare} onClick={sendEmailInvoice}>
+                {creatingShare ? <RefreshCw className="mr-2 size-4 animate-spin" /> : <Mail className="mr-2 size-4" />}
                 Send by Email
               </Button>
 
-              <Button
-                type="button"
-                variant="outline"
-                className="h-11 w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
-                disabled={!invoice || !hasId || creatingShare || copyingShare}
-                onClick={copyShareLink}
-              >
-                {copyingShare ? (
-                  <RefreshCw className="mr-2 size-4 animate-spin" />
-                ) : (
-                  <Link2 className="mr-2 size-4" />
-                )}
+              <Button type="button" variant="outline" className="h-11 w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white" disabled={!invoice || !hasId || creatingShare || copyingShare} onClick={copyShareLink}>
+                {copyingShare ? <RefreshCw className="mr-2 size-4 animate-spin" /> : <Link2 className="mr-2 size-4" />}
                 Copy Public Secure Link
               </Button>
-
-              {shareUrl ? (
-                <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800 ring-1 ring-emerald-200">
-                  This link only allows invoice viewing and real PDF download.
-                </div>
-              ) : null}
-            </div>
-          </Surface>
-
-          <Surface>
-            <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-base font-bold tracking-tight text-slate-950">Internal Staff Actions</div>
-                  <div className="mt-1 text-sm text-slate-600">Private back-office controls</div>
-                </div>
-                {invoice?.status ? (
-                  <Badge variant="secondary" className={cn("rounded-full border", statusStyle(invoice.status))}>
-                    {String(invoice.status).replaceAll("_", " ")}
-                  </Badge>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="space-y-3 p-4 sm:p-5">
-              <Link href={printPath} aria-disabled={!invoice || !hasId}>
-                <Button
-                  className="h-11 w-full rounded-2xl bg-[#071b38] text-white shadow-[0_16px_40px_rgba(7,27,56,0.18)] hover:bg-[#0a2750]"
-                  disabled={!invoice || !hasId}
-                >
-                  <Printer className="mr-2 size-4" />
-                  Staff Print / Save PDF
-                </Button>
-              </Link>
-
-              <Button
-                className="h-11 w-full rounded-2xl bg-[#ff8a1e] text-white shadow-[0_18px_44px_rgba(255,138,30,0.24)] hover:bg-[#f07c0f]"
-                onClick={issueInvoice}
-                disabled={!canIssue || issuing || !hasId}
-                title={!canIssue ? "Only Draft invoices can be issued" : "Issue invoice"}
-              >
-                {issuing ? <RefreshCw className="mr-2 size-4 animate-spin" /> : <Send className="mr-2 size-4" />}
-                Issue Invoice
-              </Button>
-
-              <Link
-                href={hasId ? `/sales/payments/new?invoiceId=${encodeURIComponent(id)}&invoiceNo=${encodeURIComponent(invoice?.invoice_no || "")}&amount=${encodeURIComponent(String(balance))}` : "#"}
-                aria-disabled={!invoice || !hasId || balance <= 0}
-              >
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-11 w-full rounded-2xl border-slate-200 bg-white/70 shadow-sm hover:bg-white"
-                  disabled={!invoice || !hasId || balance <= 0}
-                >
-                  <Wallet className="mr-2 size-4" />
-                  Add Payment
-                </Button>
-              </Link>
-
-              <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm font-semibold text-slate-800">Payment Snapshot</div>
-                  {balance <= 0 && invoice ? (
-                    <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
-                      <CheckCircle2 className="size-4" />
-                      Settled
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800 ring-1 ring-amber-200">
-                      <CreditCard className="size-4" />
-                      Outstanding
-                    </span>
-                  )}
-                </div>
-
-                <div className="mt-3 space-y-2 text-sm">
-                  <div className="flex items-center justify-between text-slate-600">
-                    <span>Total</span>
-                    <span className="font-semibold text-slate-900">{invoice ? money(total) : "—"}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-slate-600">
-                    <span>Paid</span>
-                    <span className="font-semibold text-slate-900">{invoice ? money(paid) : "—"}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-slate-600">
-                    <span>Balance</span>
-                    <span className={cn("font-extrabold", balance > 0 ? "text-slate-950" : "text-emerald-700")}>
-                      {invoice ? money(balance) : "—"}
-                    </span>
-                  </div>
-                </div>
-              </div>
             </div>
           </Surface>
         </div>
