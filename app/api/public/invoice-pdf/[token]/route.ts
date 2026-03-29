@@ -19,15 +19,20 @@ export async function GET(req: Request, ctx: RouteContext) {
   const reqUrl = new URL(req.url);
   const appUrl = reqUrl.origin;
 
-  const browser = await chromium.launch({ headless: true });
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null;
 
   try {
+    browser = await chromium.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
+
     const page = await browser.newPage();
 
     const publicInvoiceUrl = `${appUrl}/public-invoice/${safeToken}`;
 
     const response = await page.goto(publicInvoiceUrl, {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
       timeout: 60000,
     });
 
@@ -43,6 +48,8 @@ export async function GET(req: Request, ctx: RouteContext) {
     if (finalUrl.includes("/login")) {
       throw new Error("Public invoice URL redirected to login");
     }
+
+    await page.emulateMedia({ media: "print" });
 
     const pdf = await page.pdf({
       format: "A4",
@@ -74,6 +81,8 @@ export async function GET(req: Request, ctx: RouteContext) {
       { status: 500 }
     );
   } finally {
-    await browser.close();
+    if (browser) {
+      await browser.close();
+    }
   }
 }
