@@ -1,4 +1,4 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { createSupabaseServerClient, createSupabaseAdminClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
@@ -51,23 +51,66 @@ function normalizeStatus(v: any) {
   return "DRAFT";
 }
 
-/**
- * Body from UI:
- * {
- *   id?: string,
- *   status?: "DRAFT" | "ISSUED" | "PAID" | "PARTIALLY_PAID" | "VOID",
- *   invoice_type?: "STANDARD" | "VAT" | "PROFORMA" | legacy values,
- *   invoice_date: string,
- *   customer_id?: number | null,
- *   customer_name?: string | null,
- *   customer_vat?: string | null,
- *   customer_brn?: string | null,
- *   customer_address?: string | null,
- *   site_address?: string | null,
- *   notes?: string,
- *   rows: [{ description, qty, price }]
- * }
- */
+function pad4(n: number) {
+  return String(Math.max(1, Math.floor(n))).padStart(4, "0");
+}
+
+function parseInvNo(inv: string) {
+  const m = String(inv || "").match(/(\d{1,})$/);
+  return m ? Number(m[1]) : NaN;
+}
+
+async function getNextFreeInvoiceNo(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  invoiceType: string,
+  fallbackRequested?: string | null
+) {
+  const isProForma = invoiceType === "PRO_FORMA";
+  const prefix = isProForma ? "PFI" : "INV";
+
+  const { data: existingRows, error } = await admin
+    .from("invoices")
+    .select("invoice_no, invoice_type")
+    .ilike("invoice_no", `${prefix}-%`);
+
+  if (error) {
+    throw new Error(error?.message ?? "Failed to inspect existing invoice numbers");
+  }
+
+  const filtered = (existingRows ?? []).filter((x: any) =>
+    isProForma ? x.invoice_type === "PRO_FORMA" : x.invoice_type === "VAT_INVOICE"
+  );
+
+  const nums = filtered
+    .map((x: any) => parseInvNo(String(x.invoice_no ?? "")))
+    .filter((n) => Number.isFinite(n)) as number[];
+
+  const maxExisting = nums.length ? Math.max(...nums) : 0;
+
+  const requestedNum = fallbackRequested ? parseInvNo(fallbackRequested) : NaN;
+  const nextNum = Number.isFinite(requestedNum)
+    ? Math.max(requestedNum, maxExisting + 1)
+    : maxExisting + 1;
+
+  return `${prefix}-${pad4(nextNum)}`;
+}
+
+async function bumpCompanySettingsCounter(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  invoiceType: string,
+  invoiceNo: string
+) {
+  const parsed = parseInvNo(invoiceNo);
+  if (!Number.isFinite(parsed)) return;
+
+  if (invoiceType === "VAT_INVOICE") {
+    await admin
+      .from("company_settings")
+      .update({ next_invoice_no: parsed + 1 })
+      .eq("id", 1);
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const supabase = await createSupabaseServerClient();
@@ -80,11 +123,7 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
     const admin = createSupabaseAdminClient();
 
-    const invoice_no = String(body.invoice_no ?? "").trim();
-    if (!invoice_no) {
-      return jsonError(400, { error: "invoice_no is required" });
-    }
-
+    const requestedInvoiceNo = String(body.invoice_no ?? "").trim();
     const invoiceId = String(body.id ?? "").trim() || null;
 
     const rawCustomerId = body.customer_id;
@@ -130,25 +169,25 @@ export async function POST(req: Request) {
 
     const rows = Array.isArray(body.rows) ? body.rows : [];
     const cleanRows = rows
-    .map((r: any) => {
-    const description = String(r.description ?? "").trim();
-    const rawQty = String(r.qty ?? "").trim();
-    const rawPrice = String(r.price ?? "").trim();
+      .map((r: any) => {
+        const description = String(r.description ?? "").trim();
+        const rawQty = String(r.qty ?? "").trim();
+        const rawPrice = String(r.price ?? "").trim();
 
-    return {
-      description,
-      qty: rawQty === "" ? 1 : qtyForCalc(r.qty),
-      unit_price_excl_vat: n2(r.price),
-      hasAnyValue: description.length > 0 || rawQty !== "" || rawPrice !== "",
-    };
-  })
-  .filter((r: any) => r.hasAnyValue && r.description.length > 0 && r.qty > 0);
+        return {
+          description,
+          qty: rawQty === "" ? 1 : qtyForCalc(r.qty),
+          unit_price_excl_vat: n2(r.price),
+          hasAnyValue: description.length > 0 || rawQty !== "" || rawPrice !== "",
+        };
+      })
+      .filter((r: any) => r.hasAnyValue && r.description.length > 0 && r.qty > 0);
 
-if (cleanRows.length === 0) {
-  return jsonError(400, {
-    error: "At least one invoice item is required.",
-  });
-}
+    if (cleanRows.length === 0) {
+      return jsonError(400, {
+        error: "At least one invoice item is required.",
+      });
+    }
 
     const computedSubtotal = cleanRows.reduce(
       (s: number, r: any) => s + n2(r.qty) * n2(r.unit_price_excl_vat),
@@ -169,63 +208,115 @@ if (cleanRows.length === 0) {
 
     let savedInvoice: any = null;
 
-    const invoicePayload = {
-      invoice_no,
-      customer_id: hasCustomerId ? customerIdNum : null,
-      customer_name,
-      customer_vat,
-      customer_brn,
-      customer_address,
-      invoice_type,
-      invoice_date,
-      site_address,
-      status: finalStatus,
-      notes,
-      subtotal: computedSubtotal,
-      vat_amount: computedVat,
-      total_amount: computedTotal,
-      paid_amount,
-      balance_amount,
-    };
-
     if (!invoiceId) {
-      const { data, error } = await admin
-        .from("invoices")
-        .insert({
-          ...invoicePayload,
-          created_by: userRes.user.id,
-        })
-        .select(`
-          id,
-          invoice_no,
-          customer_id,
-          customer_name,
-          customer_vat,
-          customer_brn,
-          customer_address,
-          invoice_type,
-          invoice_date,
-          site_address,
-          status,
-          notes,
-          subtotal,
-          vat_amount,
-          total_amount,
-          paid_amount,
-          balance_amount,
-          created_at
-        `)
-        .single();
+      let invoice_no =
+        requestedInvoiceNo ||
+        (await getNextFreeInvoiceNo(admin, invoice_type, requestedInvoiceNo));
 
-      if (error) {
-        return jsonError(500, {
-          error: "Failed to create invoice",
-          supabaseError: safeError(error),
-        });
+      const basePayload = {
+        customer_id: hasCustomerId ? customerIdNum : null,
+        customer_name,
+        customer_vat,
+        customer_brn,
+        customer_address,
+        invoice_type,
+        invoice_date,
+        site_address,
+        status: finalStatus,
+        notes,
+        subtotal: computedSubtotal,
+        vat_amount: computedVat,
+        total_amount: computedTotal,
+        paid_amount,
+        balance_amount,
+        created_by: userRes.user.id,
+      };
+
+      let lastError: any = null;
+
+      for (let attempt = 0; attempt < 6; attempt++) {
+        const { data, error } = await admin
+          .from("invoices")
+          .insert({
+            ...basePayload,
+            invoice_no,
+          })
+          .select(`
+            id,
+            invoice_no,
+            customer_id,
+            customer_name,
+            customer_vat,
+            customer_brn,
+            customer_address,
+            invoice_type,
+            invoice_date,
+            site_address,
+            status,
+            notes,
+            subtotal,
+            vat_amount,
+            total_amount,
+            paid_amount,
+            balance_amount,
+            created_at
+          `)
+          .single();
+
+        if (!error) {
+          savedInvoice = data;
+          await bumpCompanySettingsCounter(admin, invoice_type, invoice_no);
+          break;
+        }
+
+        lastError = error;
+
+        const msg = String(error?.message ?? "").toLowerCase();
+        const isDuplicate =
+          msg.includes("duplicate key value") ||
+          msg.includes("invoices_invoice_no_key") ||
+          error?.code === "23505";
+
+        if (!isDuplicate) {
+          return jsonError(500, {
+            error: error?.message ?? "Failed to create invoice",
+            supabaseError: safeError(error),
+          });
+        }
+
+        invoice_no = await getNextFreeInvoiceNo(admin, invoice_type, invoice_no);
       }
 
-      savedInvoice = data;
+      if (!savedInvoice) {
+        return jsonError(500, {
+          error: lastError?.message ?? "Failed to create invoice",
+          supabaseError: safeError(lastError),
+        });
+      }
     } else {
+      const invoice_no =
+        requestedInvoiceNo ||
+        (await getNextFreeInvoiceNo(admin, invoice_type, requestedInvoiceNo));
+
+      const invoicePayload = {
+        invoice_no,
+        customer_id: hasCustomerId ? customerIdNum : null,
+        customer_name,
+        customer_vat,
+        customer_brn,
+        customer_address,
+        invoice_type,
+        invoice_date,
+        site_address,
+        status: finalStatus,
+        notes,
+        subtotal: computedSubtotal,
+        vat_amount: computedVat,
+        total_amount: computedTotal,
+        paid_amount,
+        balance_amount,
+      };
+
       const { data, error } = await admin
         .from("invoices")
         .update(invoicePayload)
@@ -255,7 +346,7 @@ if (cleanRows.length === 0) {
 
       if (error) {
         return jsonError(500, {
-          error: "Failed to update invoice",
+          error: error?.message ?? "Failed to update invoice",
           supabaseError: safeError(error),
         });
       }

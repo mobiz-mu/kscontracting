@@ -445,7 +445,7 @@ export default function NewInvoicePage() {
        j?.supabaseError?.details ??
        j?.error?.message ??
        j?.error ??
-    `    Save failed (HTTP ${res.status})`
+      `Save failed (HTTP ${res.status})`
     );
    }
 
