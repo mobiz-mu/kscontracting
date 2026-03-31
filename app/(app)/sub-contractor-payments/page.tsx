@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import * as React from "react";
 import Link from "next/link";
@@ -14,8 +14,9 @@ type PaymentRow = {
   payment_method: string | null;
   reference_no: string | null;
   amount: number;
-  sub_contractors?: { name?: string | null } | null;
-  purchase_bills?: { bill_no?: string | null } | null;
+  sub_contractor_id: number | null;
+  sub_contractors?: { id?: number | null; name?: string | null } | null;
+  purchase_bills?: { id?: number | null; bill_no?: string | null } | null;
 };
 
 function money(v: any) {
@@ -137,13 +138,21 @@ export default function SubContractorPaymentsPage() {
                   <td className="p-3">{row.reference_no ?? "—"}</td>
                   <td className="p-3 text-right font-semibold">{money(row.amount)}</td>
                   <td className="p-3 text-right">
-                    <Link
-                      href={`/sub-contractors/ledger?sub_contractor_payment_id=${row.id}`}
-                      className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline"
-                    >
-                      Open
-                      <ArrowUpRight className="h-4 w-4" />
-                    </Link>
+                    {row.sub_contractor_id ? (
+                      <Link
+                        href={`/sub-contractors/${encodeURIComponent(
+                          String(row.sub_contractor_id)
+                        )}/ledger?sub_contractor_payment_id=${encodeURIComponent(
+                          String(row.id)
+                        )}`}
+                        className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline"
+                      >
+                        Open
+                        <ArrowUpRight className="h-4 w-4" />
+                      </Link>
+                    ) : (
+                      <span className="text-sm text-slate-400">Open</span>
+                    )}
                   </td>
                 </tr>
               ))

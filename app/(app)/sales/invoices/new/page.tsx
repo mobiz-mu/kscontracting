@@ -440,8 +440,14 @@ export default function NewInvoicePage() {
     const j = ct.includes("application/json") ? JSON.parse(text) : null;
 
     if (!res.ok || !j?.ok) {
-      throw new Error(j?.error?.message ?? j?.error ?? `Save failed (HTTP ${res.status})`);
-    }
+      throw new Error(
+       j?.supabaseError?.message ??
+       j?.supabaseError?.details ??
+       j?.error?.message ??
+       j?.error ??
+    `    Save failed (HTTP ${res.status})`
+    );
+   }
 
     const inv = j.data?.invoice;
     const id = String(inv?.id ?? "").trim();
@@ -1254,6 +1260,7 @@ You can also add phases, materials, quotation reference, and special notes here.
     </div>
   );
 }
+
 
 
 
