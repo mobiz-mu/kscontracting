@@ -12,8 +12,6 @@ import {
   Filter,
   ChevronLeft,
   ChevronRight,
-  Calendar,
-  CircleDollarSign,
   AlertTriangle,
   BadgeCheck,
   Wallet,
@@ -25,6 +23,7 @@ import {
   Ban,
   Eye,
   Loader2,
+  PencilLine,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -111,6 +110,10 @@ function safeId(id: any) {
   return s;
 }
 
+function isDraftStatus(status?: string | null) {
+  return String(status ?? "").toUpperCase() === "DRAFT";
+}
+
 async function safeGet<T>(url: string): Promise<T> {
   const res = await fetch(url, { cache: "no-store" });
   const ct = res.headers.get("content-type") || "";
@@ -126,7 +129,9 @@ async function safeGet<T>(url: string): Promise<T> {
   }
 
   if (!ct.includes("application/json")) {
-    throw new Error(`Expected JSON but got ${ct || "unknown"}: ${raw.slice(0, 120)}`);
+    throw new Error(
+      `Expected JSON but got ${ct || "unknown"}: ${raw.slice(0, 120)}`
+    );
   }
 
   return JSON.parse(raw) as T;
@@ -152,7 +157,10 @@ async function safeMutation(url: string, init?: RequestInit) {
 
   if (!res.ok) {
     throw new Error(
-      parsed?.error?.message ?? parsed?.error ?? parsed?.message ?? `HTTP ${res.status}`
+      parsed?.error?.message ??
+        parsed?.error ??
+        parsed?.message ??
+        `HTTP ${res.status}`
     );
   }
 
@@ -170,15 +178,22 @@ function useDebounced<T>(value: T, ms = 350) {
 
 function statusTone(st?: string) {
   const s = String(st || "").toUpperCase();
-  if (s === "PAID") return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200";
+  if (s === "PAID")
+    return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200";
   if (s === "ISSUED") return "bg-blue-50 text-blue-700 ring-1 ring-blue-200";
-  if (s === "PARTIALLY_PAID") return "bg-amber-50 text-amber-800 ring-1 ring-amber-200";
+  if (s === "PARTIALLY_PAID")
+    return "bg-amber-50 text-amber-800 ring-1 ring-amber-200";
   if (s === "VOID") return "bg-rose-50 text-rose-700 ring-1 ring-rose-200";
-  if (s === "DRAFT") return "bg-slate-50 text-slate-700 ring-1 ring-slate-200";
+  if (s === "DRAFT")
+    return "bg-slate-50 text-slate-700 ring-1 ring-slate-200";
   return "bg-slate-50 text-slate-700 ring-1 ring-slate-200";
 }
 
-function exportCsv(filename: string, head: string[], rows: (string | number)[][]) {
+function exportCsv(
+  filename: string,
+  head: string[],
+  rows: (string | number)[][]
+) {
   const csv =
     [head, ...rows]
       .map((row) =>
@@ -277,7 +292,12 @@ function KPICard({
           {sub ? <div className="mt-2 text-xs text-slate-600">{sub}</div> : null}
         </div>
 
-        <div className={cn("grid size-11 place-items-center rounded-2xl ring-1 sm:size-12", tones[tone])}>
+        <div
+          className={cn(
+            "grid size-11 place-items-center rounded-2xl ring-1 sm:size-12",
+            tones[tone]
+          )}
+        >
           <Icon className="size-5" />
         </div>
       </div>
@@ -323,7 +343,14 @@ function DotsActionButton({ busy }: { busy?: boolean }) {
   );
 }
 
-const STATUS_OPTIONS = ["ALL", "DRAFT", "ISSUED", "PAID", "PARTIALLY_PAID", "VOID"] as const;
+const STATUS_OPTIONS = [
+  "ALL",
+  "DRAFT",
+  "ISSUED",
+  "PAID",
+  "PARTIALLY_PAID",
+  "VOID",
+] as const;
 type StatusFilter = (typeof STATUS_OPTIONS)[number];
 
 export default function InvoicesPage() {
@@ -365,8 +392,13 @@ export default function InvoicesPage() {
       params.set("page", String(p));
       params.set("pageSize", String(pageSize));
 
-      const res = await safeGet<InvoicesResponse>(`/api/invoices?${params.toString()}`);
-      if (!res.ok) throw new Error(res?.error?.message ?? res?.error ?? "Failed to load invoices");
+      const res = await safeGet<InvoicesResponse>(
+        `/api/invoices?${params.toString()}`
+      );
+      if (!res.ok)
+        throw new Error(
+          res?.error?.message ?? res?.error ?? "Failed to load invoices"
+        );
 
       setRows(Array.isArray(res.data) ? res.data : []);
       setMeta(res.meta ?? null);
@@ -394,7 +426,10 @@ export default function InvoicesPage() {
 
   const totalValue = rows.reduce((s, r) => s + n2(r.total_amount), 0);
   const totalBalance = rows.reduce((s, r) => s + n2(r.balance_amount), 0);
-  const totalPaid = rows.reduce((s, r) => s + (n2(r.total_amount) - n2(r.balance_amount)), 0);
+  const totalPaid = rows.reduce(
+    (s, r) => s + (n2(r.total_amount) - n2(r.balance_amount)),
+    0
+  );
 
   function exportCurrentCsv() {
     const head = [
@@ -431,19 +466,32 @@ export default function InvoicesPage() {
 
   function addPayment(id: string, invoiceNo: string, balance: number) {
     router.push(
-      `/sales/payments/new?invoiceId=${encodeURIComponent(id)}&invoiceNo=${encodeURIComponent(
-        invoiceNo
-      )}&amount=${encodeURIComponent(String(balance))}`
+      `/sales/payments/new?invoiceId=${encodeURIComponent(
+        id
+      )}&invoiceNo=${encodeURIComponent(invoiceNo)}&amount=${encodeURIComponent(
+        String(balance)
+      )}`
     );
   }
 
-  async function sendWhatsApp(id: string, invoiceNo: string, customerName: string | null) {
+  function goToEditDraft(id: string) {
+    router.push(`/sales/invoices/new?edit=${encodeURIComponent(id)}`);
+  }
+
+  async function sendWhatsApp(
+    id: string,
+    invoiceNo: string,
+    customerName: string | null
+  ) {
     try {
-      const shareRes = await fetch(`/api/invoices/${encodeURIComponent(id)}/share-link`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-      });
+      const shareRes = await fetch(
+        `/api/invoices/${encodeURIComponent(id)}/share-link`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+        }
+      );
 
       const shareJson = await shareRes.json();
 
@@ -457,7 +505,10 @@ export default function InvoicesPage() {
       }
 
       const publicUrl = String(shareJson.data.share_url);
-      const pdfUrl = publicUrl.replace("/public-invoice/", "/api/public/invoice-pdf/");
+      const pdfUrl = publicUrl.replace(
+        "/public-invoice/",
+        "/api/public/invoice-pdf/"
+      );
 
       const text = [
         `Dear ${customerName || "Customer"},`,
@@ -518,6 +569,8 @@ export default function InvoicesPage() {
     statusValue: string,
     isBusy: boolean
   ) {
+    const canEditDraft = !!id && isDraftStatus(statusValue);
+
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -538,6 +591,16 @@ export default function InvoicesPage() {
             <Eye className="mr-2 size-4" />
             Open details
           </DropdownMenuItem>
+
+          {canEditDraft ? (
+            <DropdownMenuItem
+              className="rounded-xl bg-orange-50 font-semibold text-orange-700 focus:bg-orange-100 focus:text-orange-700"
+              onClick={() => goToEditDraft(id)}
+            >
+              <PencilLine className="mr-2 size-4" />
+              Edit Draft
+            </DropdownMenuItem>
+          ) : null}
 
           <DropdownMenuItem
             className="rounded-xl"
@@ -639,8 +702,9 @@ export default function InvoicesPage() {
               </h1>
 
               <p className="mt-2 max-w-4xl text-sm leading-6 text-blue-50/90 sm:text-[15px]">
-                Premium enterprise invoice workspace for KS Contracting with clean financial visibility,
-                MUR currency formatting, refined customer presentation, payment workflows, WhatsApp sharing,
+                Premium enterprise invoice workspace for KS Contracting with
+                clean financial visibility, MUR currency formatting, refined
+                customer presentation, payment workflows, WhatsApp sharing,
                 print access, and luxury SaaS-grade usability.
               </p>
             </div>
@@ -652,7 +716,9 @@ export default function InvoicesPage() {
                 onClick={() => setRefreshTick((x) => x + 1)}
                 disabled={loading}
               >
-                <RefreshCw className={cn("mr-2 size-4", loading && "animate-spin")} />
+                <RefreshCw
+                  className={cn("mr-2 size-4", loading && "animate-spin")}
+                />
                 Refresh
               </Button>
 
@@ -682,7 +748,7 @@ export default function InvoicesPage() {
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Search invoice number or customer name..."
-                className="h-12 rounded-2xl border-white/15 bg-white text-slate-900 pl-10 shadow-sm placeholder:text-slate-400"
+                className="h-12 rounded-2xl border-white/15 bg-white pl-10 text-slate-900 shadow-sm placeholder:text-slate-400"
               />
             </div>
 
@@ -694,7 +760,10 @@ export default function InvoicesPage() {
 
               {STATUS_OPTIONS.map((s) => {
                 const active = status === s;
-                const count = s === "ALL" ? totalCount : statusCounts[String(s).toUpperCase()] ?? 0;
+                const count =
+                  s === "ALL"
+                    ? totalCount
+                    : statusCounts[String(s).toUpperCase()] ?? 0;
 
                 return (
                   <button
@@ -704,7 +773,8 @@ export default function InvoicesPage() {
                     className={cn(
                       "h-10 rounded-2xl px-4 text-sm font-semibold transition-all",
                       "border border-white/20 bg-white/10 text-white backdrop-blur-sm hover:bg-white/16",
-                      active && "border-[#ffb266] bg-white text-[#071b38] shadow-sm"
+                      active &&
+                        "border-[#ffb266] bg-white text-[#071b38] shadow-sm"
                     )}
                   >
                     {s === "ALL" ? "All" : s.replaceAll("_", " ")}
@@ -739,14 +809,14 @@ export default function InvoicesPage() {
           tone="blue"
         />
         <KPICard
-          icon={CircleDollarSign}
+          icon={Wallet}
           label="Gross Value"
           value={money(kpi?.totalValue ?? totalValue)}
           sub="All invoices in current filter"
           tone="emerald"
         />
         <KPICard
-          icon={Wallet}
+          icon={CheckCircle2}
           label="Collected"
           value={money(totalPaid)}
           sub={`Partial ${partial}`}
@@ -757,7 +827,9 @@ export default function InvoicesPage() {
           label="Outstanding"
           value={money(kpi?.totalOutstanding ?? totalBalance)}
           sub={`Overdue ${kpi?.overdueCount ?? 0}`}
-          tone={n2(kpi?.totalOutstanding ?? totalBalance) > 0 ? "orange" : "emerald"}
+          tone={
+            n2(kpi?.totalOutstanding ?? totalBalance) > 0 ? "orange" : "emerald"
+          }
         />
       </div>
 
@@ -769,7 +841,8 @@ export default function InvoicesPage() {
                 Premium Invoice Register
               </div>
               <div className="mt-1 text-sm text-slate-600">
-                Compact luxury register layout with always-visible action menu and no bottom horizontal scroll.
+                Compact luxury register layout with always-visible action menu
+                and no bottom horizontal scroll.
               </div>
             </div>
 
@@ -787,14 +860,30 @@ export default function InvoicesPage() {
                 "grid-cols-[minmax(130px,1.1fr)_minmax(180px,1.5fr)_110px_120px_120px_120px_110px_56px]"
               )}
             >
-              <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Invoice</div>
-              <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Customer</div>
-              <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Date</div>
-              <div className="text-right text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Total</div>
-              <div className="text-right text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Paid</div>
-              <div className="text-right text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Balance</div>
-              <div className="text-center text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Status</div>
-              <div className="text-right text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">⋯</div>
+              <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                Invoice
+              </div>
+              <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                Customer
+              </div>
+              <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                Date
+              </div>
+              <div className="text-right text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                Total
+              </div>
+              <div className="text-right text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                Paid
+              </div>
+              <div className="text-right text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                Balance
+              </div>
+              <div className="text-center text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                Status
+              </div>
+              <div className="text-right text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                ⋯
+              </div>
             </div>
           </div>
 
@@ -805,7 +894,7 @@ export default function InvoicesPage() {
                   <div
                     key={i}
                     className={cn(
-                      "grid items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-4 animate-pulse",
+                      "grid animate-pulse items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-4",
                       "grid-cols-[minmax(130px,1.1fr)_minmax(180px,1.5fr)_110px_120px_120px_120px_110px_56px]"
                     )}
                   >
@@ -839,10 +928,13 @@ export default function InvoicesPage() {
                   const total = n2(r.total_amount);
                   const bal = n2(r.balance_amount);
                   const paidAmt =
-                    typeof r.paid_amount === "number" && Number.isFinite(r.paid_amount)
+                    typeof r.paid_amount === "number" &&
+                    Number.isFinite(r.paid_amount)
                       ? n2(r.paid_amount)
                       : Math.max(0, total - bal);
-                  const href = id ? `/sales/invoices/${encodeURIComponent(id)}` : "";
+                  const href = id
+                    ? `/sales/invoices/${encodeURIComponent(id)}`
+                    : "";
                   const isBusy = busyActionId === id;
 
                   return (
@@ -931,7 +1023,10 @@ export default function InvoicesPage() {
           {loading ? (
             <div className="space-y-3 p-4 sm:p-5">
               {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="animate-pulse rounded-3xl border border-slate-200 p-4">
+                <div
+                  key={i}
+                  className="animate-pulse rounded-3xl border border-slate-200 p-4"
+                >
                   <div className="h-4 w-28 rounded bg-slate-200" />
                   <div className="mt-3 h-4 w-44 rounded bg-slate-200" />
                   <div className="mt-4 grid grid-cols-2 gap-3">
@@ -960,10 +1055,13 @@ export default function InvoicesPage() {
                 const total = n2(r.total_amount);
                 const bal = n2(r.balance_amount);
                 const paidAmt =
-                  typeof r.paid_amount === "number" && Number.isFinite(r.paid_amount)
+                  typeof r.paid_amount === "number" &&
+                  Number.isFinite(r.paid_amount)
                     ? n2(r.paid_amount)
                     : Math.max(0, total - bal);
-                const href = id ? `/sales/invoices/${encodeURIComponent(id)}` : "";
+                const href = id
+                  ? `/sales/invoices/${encodeURIComponent(id)}`
+                  : "";
                 const isBusy = busyActionId === id;
 
                 return (
@@ -995,8 +1093,22 @@ export default function InvoicesPage() {
                           Date: {fmtDate(r.invoice_date)}
                         </div>
 
-                        <div className="mt-2">
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
                           <StatusPill value={r.status} />
+                          {isDraftStatus(r.status) && id ? (
+                            <button
+                              type="button"
+                              onClick={() => goToEditDraft(id)}
+                              className={cn(
+                                "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-wide",
+                                "bg-orange-50 text-orange-700 ring-1 ring-orange-200",
+                                "hover:bg-orange-100"
+                              )}
+                            >
+                              <PencilLine className="size-3" />
+                              Edit Draft
+                            </button>
+                          ) : null}
                         </div>
                       </div>
 
@@ -1060,7 +1172,8 @@ export default function InvoicesPage() {
         <div className="flex flex-col gap-3 border-t border-slate-200 bg-white px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <div className="text-xs text-slate-600">
             Page <span className="font-semibold text-slate-950">{meta?.page ?? page}</span> •{" "}
-            <span className="font-semibold text-slate-950">{rows.length}</span> rows
+            <span className="font-semibold text-slate-950">{rows.length}</span>{" "}
+            rows
           </div>
 
           <div className="flex items-center gap-2">

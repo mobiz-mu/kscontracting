@@ -16,7 +16,6 @@ import {
   CircleDollarSign,
   AlertTriangle,
   BadgeCheck,
-  MoreHorizontal,
   Download,
   Printer,
   MessageCircle,
@@ -28,6 +27,7 @@ import {
   Clock3,
   Building2,
   Send,
+  PencilLine,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -133,6 +133,14 @@ function isExpired(validUntil?: string | null) {
   return d.getTime() < today.getTime();
 }
 
+function isDraftStatus(status?: string | null) {
+  return String(status ?? "").trim().toUpperCase() === "DRAFT";
+}
+
+function isAcceptedStatus(status?: string | null) {
+  return String(status ?? "").trim().toUpperCase() === "ACCEPTED";
+}
+
 async function safeGet<T>(url: string): Promise<T> {
   const res = await fetch(url, { cache: "no-store" });
   const ct = res.headers.get("content-type") || "";
@@ -148,7 +156,9 @@ async function safeGet<T>(url: string): Promise<T> {
   }
 
   if (!ct.includes("application/json")) {
-    throw new Error(`Expected JSON but got ${ct || "unknown"}: ${raw.slice(0, 120)}`);
+    throw new Error(
+      `Expected JSON but got ${ct || "unknown"}: ${raw.slice(0, 120)}`
+    );
   }
 
   return JSON.parse(raw) as T;
@@ -166,15 +176,24 @@ function useDebounced<T>(value: T, ms = 350) {
 function statusTone(st?: string, expired?: boolean) {
   const s = String(st || "").toUpperCase();
 
-  if (expired || s === "EXPIRED") return "bg-amber-50 text-amber-800 ring-1 ring-amber-200";
-  if (s === "ACCEPTED") return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200";
+  if (expired || s === "EXPIRED")
+    return "bg-amber-50 text-amber-800 ring-1 ring-amber-200";
+  if (s === "ACCEPTED")
+    return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200";
   if (s === "SENT") return "bg-blue-50 text-blue-700 ring-1 ring-blue-200";
-  if (s === "REJECTED") return "bg-rose-50 text-rose-700 ring-1 ring-rose-200";
-  if (s === "DRAFT") return "bg-slate-50 text-slate-700 ring-1 ring-slate-200";
+  if (s === "REJECTED")
+    return "bg-rose-50 text-rose-700 ring-1 ring-rose-200";
+  if (s === "VOID") return "bg-rose-50 text-rose-700 ring-1 ring-rose-200";
+  if (s === "DRAFT")
+    return "bg-slate-50 text-slate-700 ring-1 ring-slate-200";
   return "bg-slate-50 text-slate-700 ring-1 ring-slate-200";
 }
 
-function exportCsv(filename: string, head: string[], rows: (string | number)[][]) {
+function exportCsv(
+  filename: string,
+  head: string[],
+  rows: (string | number)[][]
+) {
   const csv =
     [head, ...rows]
       .map((row) =>
@@ -277,7 +296,12 @@ function KPICard({
           {sub ? <div className="mt-2 text-xs text-slate-600">{sub}</div> : null}
         </div>
 
-        <div className={cn("grid size-12 place-items-center rounded-2xl ring-1", tones[tone])}>
+        <div
+          className={cn(
+            "grid size-12 place-items-center rounded-2xl ring-1",
+            tones[tone]
+          )}
+        >
           <Icon className="size-5" />
         </div>
       </div>
@@ -308,7 +332,14 @@ function StatusPill({
    Page
 ========================================= */
 
-const STATUS_OPTIONS = ["ALL", "DRAFT", "SENT", "ACCEPTED", "REJECTED", "EXPIRED"] as const;
+const STATUS_OPTIONS = [
+  "ALL",
+  "DRAFT",
+  "SENT",
+  "ACCEPTED",
+  "REJECTED",
+  "EXPIRED",
+] as const;
 type StatusFilter = (typeof STATUS_OPTIONS)[number];
 
 export default function QuotationsPage() {
@@ -341,8 +372,13 @@ export default function QuotationsPage() {
       params.set("page", String(p));
       params.set("pageSize", String(pageSize));
 
-      const res = await safeGet<QuotesResponse>(`/api/quotations?${params.toString()}`);
-      if (!res.ok) throw new Error(res?.error?.message ?? res?.error ?? "Failed to load quotations");
+      const res = await safeGet<QuotesResponse>(
+        `/api/quotations?${params.toString()}`
+      );
+      if (!res.ok)
+        throw new Error(
+          res?.error?.message ?? res?.error ?? "Failed to load quotations"
+        );
 
       setRows(Array.isArray(res.data) ? res.data : []);
       setMeta(res.meta ?? null);
@@ -380,16 +416,26 @@ export default function QuotationsPage() {
 
   const currentTotal = rows.reduce((s, r) => s + n2(r.total_amount), 0);
   const currentExpired = rows.filter(
-    (r) => isExpired(r.valid_until) || String(r.status || "").toUpperCase() === "EXPIRED"
+    (r) =>
+      isExpired(r.valid_until) ||
+      String(r.status || "").toUpperCase() === "EXPIRED"
   ).length;
   const avgValue = rows.length ? currentTotal / rows.length : 0;
 
   function exportCurrentCsv() {
-    const head = ["Quotation No", "Customer", "Quote Date", "Valid Until", "Total (MUR)", "Status"];
+    const head = [
+      "Quotation No",
+      "Customer",
+      "Quote Date",
+      "Valid Until",
+      "Total (MUR)",
+      "Status",
+    ];
 
     const body = rows.map((r) => {
       const expiredRow =
-        isExpired(r.valid_until) || String(r.status || "").toUpperCase() === "EXPIRED";
+        isExpired(r.valid_until) ||
+        String(r.status || "").toUpperCase() === "EXPIRED";
 
       return [
         r.quote_no,
@@ -404,33 +450,41 @@ export default function QuotationsPage() {
     exportCsv("ks-contracting-quotations-register.csv", head, body);
   }
 
-  function sendWhatsApp(id: string, quoteNo: string, customerName: string | null) {
-  const base = typeof window !== "undefined" ? window.location.origin : "";
-  const printUrl = `${base}/sales/quotations/${encodeURIComponent(id)}/print`;
+  function sendWhatsApp(
+    id: string,
+    quoteNo: string,
+    customerName: string | null
+  ) {
+    const base = typeof window !== "undefined" ? window.location.origin : "";
+    const printUrl = `${base}/sales/quotations/${encodeURIComponent(id)}/print`;
 
-  const text = [
-    `Dear ${customerName || "Customer"},`,
-    ``,
-    `Please find your quotation ${quoteNo}.`,
-    `You can view / print it here:`,
-    `${printUrl}`,
-    ``,
-    `KS Contracting Ltd`,
-  ].join("\n");
+    const text = [
+      `Dear ${customerName || "Customer"},`,
+      ``,
+      `Please find your quotation ${quoteNo}.`,
+      `You can view / print it here:`,
+      `${printUrl}`,
+      ``,
+      `KS Contracting Ltd`,
+    ].join("\n");
 
-  const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
-  window.open(waUrl, "_blank", "noopener,noreferrer");
-}
+    const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    window.open(waUrl, "_blank", "noopener,noreferrer");
+  }
 
-function goToConvert(id: string) {
-  if (!id) return;
-  setBusyActionId(id);
-  router.push(`/sales/quotations/${encodeURIComponent(id)}/convert`);
-}
+  function goToConvert(id: string) {
+    if (!id) return;
+    setBusyActionId(id);
+    router.push(`/sales/quotations/${encodeURIComponent(id)}/convert`);
+  }
+
+  function goToEditDraft(id: string) {
+    if (!id) return;
+    router.push(`/sales/quotations/new?edit=${encodeURIComponent(id)}`);
+  }
 
   return (
     <div className="space-y-5">
-      {/* Header */}
       <Surface className="overflow-hidden">
         <div className="absolute inset-0 bg-[linear-gradient(135deg,#071b38_0%,#0d2c59_48%,#163d73_100%)]" />
         <div className="absolute inset-0 opacity-80 bg-[radial-gradient(900px_320px_at_-10%_-20%,rgba(255,255,255,0.14),transparent_55%),radial-gradient(700px_300px_at_110%_0%,rgba(255,153,51,0.20),transparent_50%)]" />
@@ -460,9 +514,10 @@ function goToConvert(id: string) {
               </h1>
 
               <p className="mt-2 max-w-4xl text-sm leading-6 text-blue-50/90 sm:text-[15px]">
-                Premium enterprise quotation workspace for KS Contracting with pipeline visibility,
-                real customer presentation, executive filtering, luxury table layout, print access,
-                and WhatsApp sharing.
+                Premium enterprise quotation workspace for KS Contracting with
+                pipeline visibility, real customer presentation, executive
+                filtering, luxury table layout, print access, and WhatsApp
+                sharing.
               </p>
             </div>
 
@@ -473,7 +528,9 @@ function goToConvert(id: string) {
                 onClick={() => setRefreshTick((x) => x + 1)}
                 disabled={loading}
               >
-                <RefreshCw className={cn("mr-2 size-4", loading && "animate-spin")} />
+                <RefreshCw
+                  className={cn("mr-2 size-4", loading && "animate-spin")}
+                />
                 Refresh
               </Button>
 
@@ -496,7 +553,6 @@ function goToConvert(id: string) {
             </div>
           </div>
 
-          {/* Search + filters */}
           <div className="mt-6 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
             <div className="relative">
               <Search className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
@@ -504,7 +560,7 @@ function goToConvert(id: string) {
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Search quotation number or customer name..."
-                className="h-12 rounded-2xl border-white/15 bg-white text-slate-900 pl-10 shadow-sm placeholder:text-slate-400"
+                className="h-12 rounded-2xl border-white/15 bg-white pl-10 text-slate-900 shadow-sm placeholder:text-slate-400"
               />
             </div>
 
@@ -516,7 +572,8 @@ function goToConvert(id: string) {
 
               {STATUS_OPTIONS.map((s) => {
                 const active = status === s;
-                const count = s === "ALL" ? totalCount : byStatus[String(s).toUpperCase()] ?? 0;
+                const count =
+                  s === "ALL" ? totalCount : byStatus[String(s).toUpperCase()] ?? 0;
 
                 return (
                   <button
@@ -526,7 +583,8 @@ function goToConvert(id: string) {
                     className={cn(
                       "h-10 rounded-2xl px-4 text-sm font-semibold transition-all",
                       "border border-white/20 bg-white/10 text-white backdrop-blur-sm hover:bg-white/16",
-                      active && "border-[#ffb266] bg-white text-[#071b38] shadow-sm"
+                      active &&
+                        "border-[#ffb266] bg-white text-[#071b38] shadow-sm"
                     )}
                   >
                     {s === "ALL" ? "All" : s.replaceAll("_", " ")}
@@ -552,7 +610,6 @@ function goToConvert(id: string) {
         </div>
       </Surface>
 
-      {/* KPI */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-4">
         <KPICard
           icon={BadgeCheck}
@@ -608,7 +665,6 @@ function goToConvert(id: string) {
         />
       </div>
 
-      {/* Register */}
       <Surface>
         <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
@@ -627,7 +683,6 @@ function goToConvert(id: string) {
           </div>
         </div>
 
-        {/* Desktop table */}
         <div className="hidden xl:block">
           <div className="overflow-x-auto">
             <table className="w-full table-fixed text-sm">
@@ -647,13 +702,27 @@ function goToConvert(id: string) {
                 {loading ? (
                   Array.from({ length: 8 }).map((_, i) => (
                     <tr key={i} className="animate-pulse">
-                      <td className="px-5 py-5"><div className="h-4 w-24 rounded bg-slate-200" /></td>
-                      <td className="px-5 py-5"><div className="h-4 w-40 rounded bg-slate-200" /></td>
-                      <td className="px-5 py-5"><div className="h-4 w-24 rounded bg-slate-200" /></td>
-                      <td className="px-5 py-5"><div className="h-4 w-28 rounded bg-slate-200" /></td>
-                      <td className="px-5 py-5"><div className="ml-auto h-4 w-24 rounded bg-slate-200" /></td>
-                      <td className="px-5 py-5"><div className="mx-auto h-6 w-24 rounded-full bg-slate-200" /></td>
-                      <td className="px-5 py-5"><div className="ml-auto h-10 w-10 rounded-2xl bg-slate-200" /></td>
+                      <td className="px-5 py-5">
+                        <div className="h-4 w-24 rounded bg-slate-200" />
+                      </td>
+                      <td className="px-5 py-5">
+                        <div className="h-4 w-40 rounded bg-slate-200" />
+                      </td>
+                      <td className="px-5 py-5">
+                        <div className="h-4 w-24 rounded bg-slate-200" />
+                      </td>
+                      <td className="px-5 py-5">
+                        <div className="h-4 w-28 rounded bg-slate-200" />
+                      </td>
+                      <td className="px-5 py-5">
+                        <div className="ml-auto h-4 w-24 rounded bg-slate-200" />
+                      </td>
+                      <td className="px-5 py-5">
+                        <div className="mx-auto h-6 w-24 rounded-full bg-slate-200" />
+                      </td>
+                      <td className="px-5 py-5">
+                        <div className="ml-auto h-10 w-10 rounded-2xl bg-slate-200" />
+                      </td>
                     </tr>
                   ))
                 ) : rows.length === 0 ? (
@@ -674,9 +743,14 @@ function goToConvert(id: string) {
                   rows.map((r) => {
                     const id = safeId(r.id);
                     const expiredRow =
-                      isExpired(r.valid_until) || String(r.status || "").toUpperCase() === "EXPIRED";
-                    const href = id ? `/sales/quotations/${encodeURIComponent(id)}` : "";
+                      isExpired(r.valid_until) ||
+                      String(r.status || "").toUpperCase() === "EXPIRED";
+                    const href = id
+                      ? `/sales/quotations/${encodeURIComponent(id)}`
+                      : "";
                     const isBusy = busyActionId === id;
+                    const canEditDraft = !!id && isDraftStatus(r.status);
+                    const canConvert = !!id && isAcceptedStatus(r.status) && !expiredRow;
 
                     return (
                       <tr
@@ -738,7 +812,9 @@ function goToConvert(id: string) {
                             {fmtDate(r.valid_until)}
                           </div>
                           {expiredRow ? (
-                            <div className="mt-1 text-xs font-semibold text-amber-800">Expired</div>
+                            <div className="mt-1 text-xs font-semibold text-amber-800">
+                              Expired
+                            </div>
                           ) : null}
                         </td>
 
@@ -784,6 +860,16 @@ function goToConvert(id: string) {
                                 Open details
                               </DropdownMenuItem>
 
+                              {canEditDraft ? (
+                                <DropdownMenuItem
+                                  className="rounded-xl bg-orange-50 font-semibold text-orange-700 focus:bg-orange-100 focus:text-orange-700"
+                                  onClick={() => goToEditDraft(id)}
+                                >
+                                  <PencilLine className="mr-2 size-4" />
+                                  Edit Draft
+                                </DropdownMenuItem>
+                              ) : null}
+
                               <DropdownMenuItem
                                 className="rounded-xl"
                                 disabled={!id}
@@ -814,17 +900,19 @@ function goToConvert(id: string) {
 
                               <DropdownMenuSeparator />
 
-                              <DropdownMenuItem
-                                className="rounded-xl"
-                                disabled={!id || isBusy}
-                                onClick={() => {
-                                if (!id) return;
-                                 goToConvert(id);
-                               }}
-                              >
-                               <Send className="mr-2 size-4" />
-                                Convert to invoice
-                              </DropdownMenuItem>
+                              {canConvert ? (
+                                <DropdownMenuItem
+                                  className="rounded-xl"
+                                  disabled={!id || isBusy}
+                                  onClick={() => {
+                                    if (!id) return;
+                                    goToConvert(id);
+                                  }}
+                                >
+                                  <Send className="mr-2 size-4" />
+                                  Convert to invoice
+                                </DropdownMenuItem>
+                              ) : null}
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </td>
@@ -837,7 +925,6 @@ function goToConvert(id: string) {
           </div>
         </div>
 
-        {/* Mobile + tablet cards */}
         <div className="xl:hidden">
           {loading ? (
             <div className="space-y-3 p-4 sm:p-5">
@@ -868,10 +955,15 @@ function goToConvert(id: string) {
             <div className="space-y-3 p-4 sm:p-5">
               {rows.map((r) => {
                 const id = safeId(r.id);
-                const href = id ? `/sales/quotations/${encodeURIComponent(id)}` : "";
+                const href = id
+                  ? `/sales/quotations/${encodeURIComponent(id)}`
+                  : "";
                 const expiredRow =
-                  isExpired(r.valid_until) || String(r.status || "").toUpperCase() === "EXPIRED";
+                  isExpired(r.valid_until) ||
+                  String(r.status || "").toUpperCase() === "EXPIRED";
                 const isBusy = busyActionId === id;
+                const canEditDraft = !!id && isDraftStatus(r.status);
+                const canConvert = !!id && isAcceptedStatus(r.status) && !expiredRow;
 
                 return (
                   <div
@@ -909,8 +1001,22 @@ function goToConvert(id: string) {
                           Valid Until: {fmtDate(r.valid_until)}
                         </div>
 
-                        <div className="mt-2">
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
                           <StatusPill value={r.status} expired={expiredRow} />
+                          {canEditDraft ? (
+                            <button
+                              type="button"
+                              onClick={() => goToEditDraft(id)}
+                              className={cn(
+                                "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-wide",
+                                "bg-orange-50 text-orange-700 ring-1 ring-orange-200",
+                                "hover:bg-orange-100"
+                              )}
+                            >
+                              <PencilLine className="size-3" />
+                              Edit Draft
+                            </button>
+                          ) : null}
                         </div>
                       </div>
 
@@ -947,6 +1053,16 @@ function goToConvert(id: string) {
                             Open details
                           </DropdownMenuItem>
 
+                          {canEditDraft ? (
+                            <DropdownMenuItem
+                              className="rounded-xl bg-orange-50 font-semibold text-orange-700 focus:bg-orange-100 focus:text-orange-700"
+                              onClick={() => goToEditDraft(id)}
+                            >
+                              <PencilLine className="mr-2 size-4" />
+                              Edit Draft
+                            </DropdownMenuItem>
+                          ) : null}
+
                           <DropdownMenuItem
                             className="rounded-xl"
                             disabled={!id}
@@ -977,17 +1093,19 @@ function goToConvert(id: string) {
 
                           <DropdownMenuSeparator />
 
-                          <DropdownMenuItem
+                          {canConvert ? (
+                            <DropdownMenuItem
                               className="rounded-xl"
                               disabled={!id || isBusy}
                               onClick={() => {
-                              if (!id) return;
-                              goToConvert(id);
-                             }}
+                                if (!id) return;
+                                goToConvert(id);
+                              }}
                             >
-                             <Send className="mr-2 size-4" />
-                             Convert to invoice
-                          </DropdownMenuItem>
+                              <Send className="mr-2 size-4" />
+                              Convert to invoice
+                            </DropdownMenuItem>
+                          ) : null}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
@@ -1031,11 +1149,11 @@ function goToConvert(id: string) {
           )}
         </div>
 
-        {/* Pagination */}
         <div className="flex flex-col gap-3 border-t border-slate-200 bg-white px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <div className="text-xs text-slate-600">
             Page <span className="font-semibold text-slate-950">{meta?.page ?? page}</span> •{" "}
-            <span className="font-semibold text-slate-950">{rows.length}</span> rows
+            <span className="font-semibold text-slate-950">{rows.length}</span>{" "}
+            rows
           </div>
 
           <div className="flex items-center gap-2">

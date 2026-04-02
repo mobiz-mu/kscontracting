@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Plus,
   Trash2,
@@ -16,6 +16,8 @@ import {
   PencilLine,
   ListChecks,
   Lock,
+  Sparkles,
+  Loader2,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -41,6 +43,45 @@ type Item = {
   qty: string;
   price: string;
   total: number;
+};
+
+type QuoteItem = {
+  id: number | string;
+  description: string;
+  qty: number;
+  unit_price_excl_vat?: number;
+  vat_rate?: number;
+  vat_amount?: number;
+  line_total?: number;
+};
+
+type Quote = {
+  id: string;
+  quote_no?: string | null;
+  quotation_no?: string | null;
+  customer_id?: number | null;
+  customer_name?: string | null;
+  customer_vat?: string | null;
+  customer_brn?: string | null;
+  customer_address?: string | null;
+  quote_date?: string | null;
+  valid_until?: string | null;
+  status?: string | null;
+  subtotal?: number | null;
+  vat_amount?: number | null;
+  total_amount?: number | null;
+  site_address?: string | null;
+  converted_invoice_id?: string | null;
+  notes?: string | null;
+  items?: QuoteItem[];
+};
+
+type QuoteGetResponse = {
+  ok: boolean;
+  data?: Quote;
+  error?: any;
+  supabaseError?: any;
+  details?: any;
 };
 
 function n2(v: any) {
@@ -71,6 +112,10 @@ function todayISO() {
 
 function pad4(n: number) {
   return String(n).padStart(4, "0");
+}
+
+function isDraftStatus(v: any) {
+  return String(v ?? "").trim().toUpperCase() === "DRAFT";
 }
 
 async function safeGet<T>(url: string): Promise<T> {
@@ -112,6 +157,16 @@ function Card3D({
 
 export default function NewQuotationPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const editId = React.useMemo(
+    () => String(searchParams.get("edit") ?? "").trim(),
+    [searchParams]
+  );
+  const isEditMode = !!editId;
+
+  const [quotationId, setQuotationId] = React.useState<string | null>(null);
+  const [loadedStatus, setLoadedStatus] = React.useState<string | null>(null);
 
   const [quotationNo, setQuotationNo] = React.useState("");
   const [quoteDate, setQuoteDate] = React.useState(todayISO());
@@ -138,6 +193,9 @@ export default function NewQuotationPage() {
   ]);
 
   const [loading, setLoading] = React.useState(false);
+  const [loadingExisting, setLoadingExisting] = React.useState(false);
+
+  const editLocked = isEditMode && !!loadedStatus && !isDraftStatus(loadedStatus);
 
   const filteredCustomers = React.useMemo(() => {
     const q = custQuery.trim().toLowerCase();
@@ -150,7 +208,12 @@ export default function NewQuotationPage() {
         const vatNo = (c.vat_no ?? "").toLowerCase();
         const brn = (c.brn ?? "").toLowerCase();
         const address = (c.address ?? "").toLowerCase();
-        return name.includes(q) || vatNo.includes(q) || brn.includes(q) || address.includes(q);
+        return (
+          name.includes(q) ||
+          vatNo.includes(q) ||
+          brn.includes(q) ||
+          address.includes(q)
+        );
       })
       .slice(0, 10);
   }, [customers, custQuery]);
@@ -201,6 +264,7 @@ export default function NewQuotationPage() {
   }
 
   function validateBeforeSave() {
+    if (editLocked) return "Only draft quotations can be edited.";
     if (!quotationNo.trim()) return "Quotation number is required.";
     if (!quoteDate.trim()) return "Quotation date is required.";
 
@@ -249,6 +313,7 @@ export default function NewQuotationPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          id: quotationId ?? undefined,
           quote_no: quotationNo,
           quotation_no: quotationNo,
           customer_id: customerMode === "LIST" && customerId ? Number(customerId) : null,
@@ -270,17 +335,28 @@ export default function NewQuotationPage() {
         }),
       });
 
-      const json = await res.json();
+      const json = await res.json().catch(() => null);
 
-      if (!res.ok) {
+      if (!res.ok || !json?.ok) {
         throw new Error(
           json?.supabaseError?.message ||
             json?.error ||
-            "Failed to create quotation"
+            "Failed to save quotation"
         );
       }
 
-      router.push(`/sales/quotations/${json.data.quotation.id}`);
+      const savedId = String(
+        json?.data?.quotation?.id ??
+          json?.data?.id ??
+          quotationId ??
+          ""
+      ).trim();
+
+      if (!savedId) {
+        throw new Error("Quotation saved but id is missing in response.");
+      }
+
+      router.push(`/sales/quotations/${savedId}`);
     } catch (e: any) {
       alert(e.message);
     } finally {
@@ -305,6 +381,8 @@ export default function NewQuotationPage() {
   }
 
   React.useEffect(() => {
+    if (isEditMode) return;
+
     let alive = true;
 
     try {
@@ -330,7 +408,7 @@ export default function NewQuotationPage() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [isEditMode]);
 
   React.useEffect(() => {
     let alive = true;
@@ -356,6 +434,83 @@ export default function NewQuotationPage() {
   }, []);
 
   React.useEffect(() => {
+    if (!isEditMode || !editId) return;
+
+    let alive = true;
+
+    (async () => {
+      setLoadingExisting(true);
+
+      try {
+        const j = await safeGet<QuoteGetResponse>(
+          `/api/quotations/${encodeURIComponent(editId)}`
+        );
+
+        const q = j?.data ?? null;
+
+        if (!q?.id) {
+          throw new Error("Draft quotation not found.");
+        }
+
+        const statusKey = String(q.status ?? "").toUpperCase();
+
+        if (!alive) return;
+
+        setQuotationId(String(q.id));
+        setLoadedStatus(statusKey);
+        setQuotationNo(String(q.quote_no ?? q.quotation_no ?? ""));
+        setQuoteDate(String(q.quote_date ?? todayISO()));
+        setSiteAddress(String(q.site_address ?? ""));
+        setNotes(String(q.notes ?? ""));
+
+        if (q.customer_id != null && Number.isFinite(Number(q.customer_id))) {
+          setCustomerMode("LIST");
+          setCustomerId(q.customer_id);
+          setCustQuery(String(q.customer_name ?? ""));
+        } else {
+          setCustomerMode("MANUAL");
+          setCustomerId(null);
+          setCustQuery(String(q.customer_name ?? ""));
+        }
+
+        setCustomerName(String(q.customer_name ?? ""));
+        setCustomerVat(String(q.customer_vat ?? ""));
+        setCustomerBrn(String(q.customer_brn ?? ""));
+        setCustomerAddress(String(q.customer_address ?? ""));
+
+        const loadedItems = Array.isArray(q.items) ? q.items : [];
+        if (loadedItems.length > 0) {
+          setItems(
+            loadedItems.map((item) => {
+              const qty = String(item.qty ?? "");
+              const price = String(item.unit_price_excl_vat ?? "");
+              return {
+                id: crypto.randomUUID(),
+                description: String(item.description ?? ""),
+                qty,
+                price,
+                total: round2(n2(qty) * n2(price)),
+              };
+            })
+          );
+        }
+
+        if (statusKey !== "DRAFT") {
+          alert("Only draft quotations can be edited.");
+        }
+      } catch (e: any) {
+        alert(e?.message || "Failed to load draft quotation.");
+      } finally {
+        if (alive) setLoadingExisting(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [editId, isEditMode]);
+
+  React.useEffect(() => {
     function onDocDown(e: MouseEvent) {
       const t = e.target as HTMLElement;
       if (!custBoxRef.current) return;
@@ -367,6 +522,13 @@ export default function NewQuotationPage() {
     return () => document.removeEventListener("mousedown", onDocDown);
   }, []);
 
+  const pageTitle = isEditMode ? "Edit Draft Quotation" : "New Quotation";
+  const saveLabel = isEditMode ? "Save Changes" : "Save Quote";
+  const backHref =
+    isEditMode && quotationId
+      ? `/sales/quotations/${encodeURIComponent(quotationId)}`
+      : "/sales/quotations";
+
   return (
     <div className="space-y-4">
       <div className="relative overflow-hidden rounded-3xl ring-1 ring-slate-200 bg-white">
@@ -375,7 +537,7 @@ export default function NewQuotationPage() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <Link
-                href="/sales/quotations"
+                href={backHref}
                 className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-800"
               >
                 <ArrowLeft size={16} />
@@ -383,7 +545,7 @@ export default function NewQuotationPage() {
               </Link>
 
               <h1 className="mt-2 text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
-                New Quotation
+                {pageTitle}
               </h1>
 
               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
@@ -406,20 +568,48 @@ export default function NewQuotationPage() {
                   <Lock className="size-3.5" />
                   Starts as DRAFT
                 </span>
+
+                {isEditMode ? (
+                  <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 font-semibold text-emerald-700 ring-1 ring-emerald-200">
+                    <PencilLine className="size-3.5" />
+                    Edit Mode
+                  </span>
+                ) : null}
               </div>
             </div>
 
             <Button
               onClick={saveQuotation}
-              disabled={loading}
+              disabled={loading || loadingExisting || editLocked}
               className="h-11 rounded-2xl bg-[#071b38] hover:bg-[#06142b]"
             >
-              <Save className="mr-2 h-4 w-4" />
-              Save Quote
+              {loading || loadingExisting ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="mr-2 h-4 w-4" />
+              )}
+              {saveLabel}
             </Button>
           </div>
         </div>
       </div>
+
+      {isEditMode ? (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          <div className="flex items-start gap-2">
+            <Sparkles className="mt-0.5 size-4 shrink-0" />
+            <div>
+              You are editing an existing draft quotation. Save changes first, then accept it when finalized.
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {editLocked ? (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          Only draft quotations can be edited.
+        </div>
+      ) : null}
 
       <Card3D className="p-5">
         <div>
@@ -452,6 +642,7 @@ export default function NewQuotationPage() {
               value={quoteDate}
               onChange={(e) => setQuoteDate(e.target.value)}
               className="h-11 rounded-2xl"
+              disabled={editLocked}
             />
           </div>
 
@@ -465,6 +656,7 @@ export default function NewQuotationPage() {
               onChange={(e) => setSiteAddress(e.target.value)}
               placeholder="Enter site address"
               className="h-11 rounded-2xl"
+              disabled={editLocked}
             />
           </div>
         </div>
@@ -473,11 +665,13 @@ export default function NewQuotationPage() {
           <button
             type="button"
             onClick={() => setCustomerMode("LIST")}
+            disabled={editLocked}
             className={cn(
               "inline-flex h-11 items-center gap-2 rounded-2xl px-4 text-sm font-semibold ring-1 transition",
               customerMode === "LIST"
                 ? "bg-[#ff8a1e] text-white ring-[#ff8a1e]"
-                : "bg-white text-slate-700 ring-slate-200 hover:bg-slate-50"
+                : "bg-white text-slate-700 ring-slate-200 hover:bg-slate-50",
+              editLocked && "pointer-events-none opacity-60"
             )}
           >
             <ListChecks className="size-4" />
@@ -487,11 +681,13 @@ export default function NewQuotationPage() {
           <button
             type="button"
             onClick={enableManualCustomer}
+            disabled={editLocked}
             className={cn(
               "inline-flex h-11 items-center gap-2 rounded-2xl px-4 text-sm font-semibold ring-1 transition",
               customerMode === "MANUAL"
                 ? "bg-[#071b38] text-white ring-[#071b38]"
-                : "bg-white text-slate-700 ring-slate-200 hover:bg-slate-50"
+                : "bg-white text-slate-700 ring-slate-200 hover:bg-slate-50",
+              editLocked && "pointer-events-none opacity-60"
             )}
           >
             <PencilLine className="size-4" />
@@ -517,13 +713,13 @@ export default function NewQuotationPage() {
               }}
               onFocus={() => setCustOpen(true)}
               onKeyDown={onCustomerKeyDown}
-              disabled={customerMode === "MANUAL"}
+              disabled={customerMode === "MANUAL" || editLocked}
               placeholder={custLoading ? "Loading customers..." : "Search name, VAT, BRN, address..."}
               className="h-11 rounded-2xl pl-10"
             />
           </div>
 
-          {customerMode === "LIST" && custOpen && (
+          {customerMode === "LIST" && custOpen && !editLocked ? (
             <div className="mt-2 overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200 shadow-[0_18px_55px_rgba(2,6,23,0.12)]">
               <div className="max-h-[300px] overflow-auto">
                 {filteredCustomers.length === 0 ? (
@@ -563,7 +759,7 @@ export default function NewQuotationPage() {
                 )}
               </div>
             </div>
-          )}
+          ) : null}
         </div>
 
         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -577,6 +773,7 @@ export default function NewQuotationPage() {
               onChange={(e) => setCustomerName(e.target.value)}
               placeholder={customerMode === "MANUAL" ? "Enter customer name" : "Selected customer name"}
               className="h-11 rounded-2xl"
+              disabled={editLocked}
             />
           </div>
 
@@ -590,6 +787,7 @@ export default function NewQuotationPage() {
               onChange={(e) => setCustomerVat(e.target.value)}
               placeholder="Enter VAT number"
               className="h-11 rounded-2xl"
+              disabled={editLocked}
             />
           </div>
 
@@ -603,6 +801,7 @@ export default function NewQuotationPage() {
               onChange={(e) => setCustomerBrn(e.target.value)}
               placeholder="Enter BRN number"
               className="h-11 rounded-2xl"
+              disabled={editLocked}
             />
           </div>
 
@@ -615,6 +814,7 @@ export default function NewQuotationPage() {
               onChange={(e) => setCustomerAddress(e.target.value)}
               className="min-h-[90px] w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-[#ff7a18]/25"
               placeholder="Customer address"
+              disabled={editLocked}
             />
           </div>
         </div>
@@ -628,6 +828,7 @@ export default function NewQuotationPage() {
             onChange={(e) => setNotes(e.target.value)}
             className="min-h-[90px] w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-[#ff7a18]/25"
             placeholder="MCB 000446509687"
+            disabled={editLocked}
           />
         </div>
       </Card3D>
@@ -641,7 +842,12 @@ export default function NewQuotationPage() {
             </div>
           </div>
 
-          <Button variant="outline" onClick={addItem} className="rounded-2xl">
+          <Button
+            variant="outline"
+            onClick={addItem}
+            className="rounded-2xl"
+            disabled={editLocked}
+          >
             <Plus className="mr-2 h-4 w-4" />
             Add item
           </Button>
@@ -660,6 +866,7 @@ export default function NewQuotationPage() {
                     placeholder="Building or false ceiling as per quotation sent..."
                     value={item.description}
                     onChange={(e) => updateItem(i, "description", e.target.value)}
+                    disabled={editLocked}
                   />
                 </div>
 
@@ -673,6 +880,7 @@ export default function NewQuotationPage() {
                     value={item.qty}
                     onChange={(e) => updateItem(i, "qty", e.target.value)}
                     onFocus={(e) => e.currentTarget.select()}
+                    disabled={editLocked}
                   />
                 </div>
 
@@ -686,6 +894,7 @@ export default function NewQuotationPage() {
                     value={item.price}
                     onChange={(e) => updateItem(i, "price", e.target.value)}
                     onFocus={(e) => e.currentTarget.select()}
+                    disabled={editLocked}
                   />
                 </div>
 
@@ -697,8 +906,12 @@ export default function NewQuotationPage() {
 
                   <button
                     onClick={() => removeItem(i)}
-                    className="grid h-11 place-items-center rounded-2xl bg-white ring-1 ring-slate-200 text-red-500 hover:bg-slate-50"
+                    className={cn(
+                      "grid h-11 place-items-center rounded-2xl bg-white ring-1 ring-slate-200 text-red-500 hover:bg-slate-50",
+                      editLocked && "pointer-events-none opacity-60"
+                    )}
                     type="button"
+                    disabled={editLocked}
                   >
                     <Trash2 size={18} />
                   </button>

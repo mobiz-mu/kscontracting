@@ -64,16 +64,24 @@ export async function POST(req: Request) {
         : Number(rawCustomerId);
 
     const customer_name =
-      typeof body.customer_name === "string" ? body.customer_name.trim() || null : null;
+      typeof body.customer_name === "string"
+        ? body.customer_name.trim() || null
+        : null;
 
     const customer_vat =
-      typeof body.customer_vat === "string" ? body.customer_vat.trim() || null : null;
+      typeof body.customer_vat === "string"
+        ? body.customer_vat.trim() || null
+        : null;
 
     const customer_brn =
-      typeof body.customer_brn === "string" ? body.customer_brn.trim() || null : null;
+      typeof body.customer_brn === "string"
+        ? body.customer_brn.trim() || null
+        : null;
 
     const customer_address =
-      typeof body.customer_address === "string" ? body.customer_address.trim() || null : null;
+      typeof body.customer_address === "string"
+        ? body.customer_address.trim() || null
+        : null;
 
     const quote_date = String(body.quote_date ?? "").trim();
     if (!quote_date) {
@@ -104,7 +112,6 @@ export async function POST(req: Request) {
       });
     }
 
-    const status = quotationId ? normalizeStatus(body.status) : "DRAFT";
     const vatRate = 0.15;
 
     const items = Array.isArray(body.items) ? body.items : [];
@@ -119,18 +126,25 @@ export async function POST(req: Request) {
           description,
           qty: rawQty === "" ? 1 : n2(it.qty),
           unit_price_excl_vat: n2(it.price),
-          hasAnyValue: description.length > 0 || rawQty !== "" || rawPrice !== "",
+          hasAnyValue:
+            description.length > 0 || rawQty !== "" || rawPrice !== "",
         };
       })
-      .filter((it: any) => it.hasAnyValue && it.description.length > 0 && it.qty > 0);
+      .filter(
+        (it: any) =>
+          it.hasAnyValue && it.description.length > 0 && it.qty > 0
+      );
 
     if (cleanItems.length === 0) {
-      return jsonError(400, { error: "Quotation must contain at least one item" });
+      return jsonError(400, {
+        error: "Quotation must contain at least one item",
+      });
     }
 
     const subtotal = round2(
       cleanItems.reduce(
-        (sum: number, it: any) => sum + n2(it.qty) * n2(it.unit_price_excl_vat),
+        (sum: number, it: any) =>
+          sum + n2(it.qty) * n2(it.unit_price_excl_vat),
         0
       )
     );
@@ -142,6 +156,8 @@ export async function POST(req: Request) {
       typeof body.quote_no === "string" ? body.quote_no.trim() : "";
     let resolvedQuotationNo =
       typeof body.quotation_no === "string" ? body.quotation_no.trim() : "";
+
+    let savedQuote: any = null;
 
     if (!quotationId) {
       const { data: settings, error: settingsErr } = await admin
@@ -163,39 +179,30 @@ export async function POST(req: Request) {
 
       resolvedQuoteNo = serverQuoteNo;
       resolvedQuotationNo = serverQuoteNo;
-    } else {
-      resolvedQuoteNo = resolvedQuoteNo || resolvedQuotationNo || null;
-      resolvedQuotationNo = resolvedQuotationNo || resolvedQuoteNo || null;
-    }
 
-    const quotationPayload = {
-      quote_no: resolvedQuoteNo,
-      quotation_no: resolvedQuotationNo,
-      customer_id: hasCustomerId ? customerIdNum : null,
-      customer_name,
-      customer_vat,
-      customer_brn,
-      customer_address,
-      quote_date,
-      valid_until,
-      notes,
-      site_address,
-      subtotal,
-      vat_amount: vatAmount,
-      total_amount: totalAmount,
-      vat_rate: vatRate,
-      status,
-    };
+      const quotationPayload = {
+        quote_no: resolvedQuoteNo,
+        quotation_no: resolvedQuotationNo,
+        customer_id: hasCustomerId ? customerIdNum : null,
+        customer_name,
+        customer_vat,
+        customer_brn,
+        customer_address,
+        quote_date,
+        valid_until,
+        notes,
+        site_address,
+        subtotal,
+        vat_amount: vatAmount,
+        total_amount: totalAmount,
+        vat_rate: vatRate,
+        status: "DRAFT",
+        created_by: userRes.user.id,
+      };
 
-    let savedQuote: any = null;
-
-    if (!quotationId) {
       const { data, error } = await admin
         .from("quotations")
-        .insert({
-          ...quotationPayload,
-          created_by: userRes.user.id,
-        })
+        .insert(quotationPayload)
         .select(`
           id,
           quote_no,
@@ -229,7 +236,8 @@ export async function POST(req: Request) {
       savedQuote = data;
 
       const currentNo =
-        Number(String(savedQuote.quote_no ?? "").match(/(\d+)$/)?.[1] ?? 1) || 1;
+        Number(String(savedQuote.quote_no ?? "").match(/(\d+)$/)?.[1] ?? 1) ||
+        1;
 
       const { error: settingsUpdateErr } = await admin
         .from("company_settings")
@@ -244,6 +252,71 @@ export async function POST(req: Request) {
         });
       }
     } else {
+      const { data: existingQuote, error: existingErr } = await admin
+        .from("quotations")
+        .select(`
+          id,
+          quote_no,
+          quotation_no,
+          status,
+          created_by
+        `)
+        .eq("id", quotationId)
+        .eq("created_by", userRes.user.id)
+        .maybeSingle();
+
+      if (existingErr) {
+        return jsonError(500, {
+          error: "Failed to load existing quotation",
+          supabaseError: safeError(existingErr),
+        });
+      }
+
+      if (!existingQuote) {
+        return jsonError(404, {
+          error: "Quotation not found",
+        });
+      }
+
+      const existingStatus = String(existingQuote.status ?? "").toUpperCase();
+      if (existingStatus !== "DRAFT") {
+        return jsonError(403, {
+          error: "Only draft quotations can be edited",
+        });
+      }
+
+      resolvedQuoteNo =
+        resolvedQuoteNo ||
+        String(existingQuote.quote_no ?? existingQuote.quotation_no ?? "").trim();
+      resolvedQuotationNo =
+        resolvedQuotationNo ||
+        String(existingQuote.quotation_no ?? existingQuote.quote_no ?? "").trim();
+
+      if (!resolvedQuoteNo || !resolvedQuotationNo) {
+        return jsonError(400, {
+          error: "Quotation number is required for draft update",
+        });
+      }
+
+      const quotationPayload = {
+        quote_no: resolvedQuoteNo,
+        quotation_no: resolvedQuotationNo,
+        customer_id: hasCustomerId ? customerIdNum : null,
+        customer_name,
+        customer_vat,
+        customer_brn,
+        customer_address,
+        quote_date,
+        valid_until,
+        notes,
+        site_address,
+        subtotal,
+        vat_amount: vatAmount,
+        total_amount: totalAmount,
+        vat_rate: vatRate,
+        status: "DRAFT",
+      };
+
       const { data, error } = await admin
         .from("quotations")
         .update(quotationPayload)
@@ -365,10 +438,15 @@ export async function GET(req: Request) {
 
     const { searchParams } = new URL(req.url);
     const q = (searchParams.get("q") ?? "").trim();
-    const rawStatus = String(searchParams.get("status") ?? "ALL").trim().toUpperCase();
+    const rawStatus = String(searchParams.get("status") ?? "ALL")
+      .trim()
+      .toUpperCase();
 
     const page = Math.max(1, Number(searchParams.get("page") ?? 1) || 1);
-    const pageSize = Math.min(200, Math.max(10, Number(searchParams.get("pageSize") ?? 25) || 25));
+    const pageSize = Math.min(
+      200,
+      Math.max(10, Number(searchParams.get("pageSize") ?? 25) || 25)
+    );
 
     const admin = createSupabaseAdminClient();
 
@@ -440,7 +518,10 @@ export async function GET(req: Request) {
     }
 
     const totalQuotes = filtered.length;
-    const totalValue = filtered.reduce((s: number, r: any) => s + n2(r.total_amount), 0);
+    const totalValue = filtered.reduce(
+      (s: number, r: any) => s + n2(r.total_amount),
+      0
+    );
 
     const total = filtered.length;
     const from = (page - 1) * pageSize;

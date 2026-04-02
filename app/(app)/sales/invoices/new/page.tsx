@@ -1,7 +1,9 @@
-﻿"use client";
+﻿
+"use client";
 
 import * as React from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   Save,
@@ -55,6 +57,56 @@ type Customer = {
   address?: string | null;
 };
 
+type ApiCustomer = {
+  id?: string | number | null;
+  name?: string | null;
+  brn?: string | null;
+  vat_no?: string | null;
+  address?: string | null;
+} | null;
+
+type ApiInvoice = {
+  id: string;
+  invoice_no?: string | null;
+  status?: string | null;
+  invoice_type?: "VAT_INVOICE" | "PRO_FORMA" | "STANDARD" | "VAT" | "PROFORMA" | string | null;
+  invoice_date?: string | null;
+  notes?: string | null;
+  subtotal?: number | null;
+  vat_amount?: number | null;
+  total_amount?: number | null;
+  paid_amount?: number | null;
+  balance_amount?: number | null;
+  created_at?: string | null;
+  issued_at?: string | null;
+  site_address?: string | null;
+  customer_id?: string | number | null;
+  customer_name?: string | null;
+  customer_vat?: string | null;
+  customer_brn?: string | null;
+  customer_address?: string | null;
+  customers?: ApiCustomer;
+};
+
+type ApiItem = {
+  id: number | string;
+  invoice_id: string;
+  description: string;
+  qty: number;
+  unit_price_excl_vat: number;
+  vat_rate: number;
+  vat_amount: number;
+  line_total: number;
+};
+
+type InvoiceGetResponse = {
+  ok: boolean;
+  data?: { invoice?: ApiInvoice; items?: ApiItem[] };
+  error?: any;
+  supabaseError?: any;
+  details?: any;
+};
+
 /* =========================================
    Helpers
 ========================================= */
@@ -89,7 +141,7 @@ function todayISO() {
 }
 
 function fmtDate(v?: string | null) {
-  if (!v) return "â€”";
+  if (!v) return "—";
   if (/^\d{4}-\d{2}-\d{2}$/.test(v)) {
     const [yyyy, mm, dd] = v.split("-");
     return `${dd}/${mm}/${yyyy}`;
@@ -106,11 +158,6 @@ function pad4(n: number) {
   return String(n).padStart(4, "0");
 }
 
-function parseInvNo(inv: string) {
-  const m = String(inv || "").match(/(\d{1,})$/);
-  return m ? Number(m[1]) : NaN;
-}
-
 async function safeGet<T>(url: string): Promise<T> {
   const res = await fetch(url, { cache: "no-store" });
   const ct = res.headers.get("content-type") || "";
@@ -118,6 +165,16 @@ async function safeGet<T>(url: string): Promise<T> {
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${text.slice(0, 240)}`);
   if (!ct.includes("application/json")) throw new Error(`Expected JSON. Got ${ct}.`);
   return JSON.parse(text) as T;
+}
+
+function normalizeInvoiceType(v: any): InvoiceType {
+  const raw = String(v ?? "").trim().toUpperCase();
+  if (raw === "PRO_FORMA" || raw === "PROFORMA") return "PRO_FORMA";
+  return "VAT_INVOICE";
+}
+
+function isDraftStatus(v: any) {
+  return String(v ?? "").trim().toUpperCase() === "DRAFT";
 }
 
 /* =========================================
@@ -261,14 +318,24 @@ function SummaryCard({
 ========================================= */
 
 export default function NewInvoicePage() {
+  const searchParams = useSearchParams();
+
+  const editId = React.useMemo(() => {
+    return String(searchParams.get("edit") ?? "").trim();
+  }, [searchParams]);
+
+  const isEditMode = !!editId;
+
   const [saving, setSaving] = React.useState(false);
   const [issuing, setIssuing] = React.useState(false);
-  const busy = saving || issuing;
+  const [loadingExisting, setLoadingExisting] = React.useState(false);
+  const busy = saving || issuing || loadingExisting;
 
   const [err, setErr] = React.useState("");
   const [toast, setToast] = React.useState<string | null>(null);
 
   const [invoiceId, setInvoiceId] = React.useState<string | null>(null);
+  const [loadedInvoiceStatus, setLoadedInvoiceStatus] = React.useState<string | null>(null);
 
   const [customers, setCustomers] = React.useState<Customer[]>([]);
   const [custLoading, setCustLoading] = React.useState(false);
@@ -325,6 +392,8 @@ export default function NewInvoicePage() {
       .slice(0, 10);
   }, [customers, custQuery]);
 
+  const editLocked = isEditMode && !!loadedInvoiceStatus && !isDraftStatus(loadedInvoiceStatus);
+
   function updateRow(id: string, patch: Partial<Row>) {
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   }
@@ -342,7 +411,9 @@ export default function NewInvoicePage() {
   function removeRow(id: string) {
     setRows((p) => {
       const next = p.filter((r) => r.id !== id);
-      return next.length ? next : [{ id: crypto.randomUUID(), description: "", qty: "1", price: "" }];
+      return next.length
+        ? next
+        : [{ id: crypto.randomUUID(), description: "", qty: "1", price: "" }];
     });
   }
 
@@ -369,6 +440,7 @@ export default function NewInvoicePage() {
   }
 
   function validateBeforeSave() {
+    if (editLocked) return "Only draft invoices can be edited.";
     if (!String(invoiceNo || "").trim()) return "Invoice number is required.";
     if (!String(invoiceDate || "").trim()) return "Invoice date is required.";
 
@@ -441,13 +513,13 @@ export default function NewInvoicePage() {
 
     if (!res.ok || !j?.ok) {
       throw new Error(
-       j?.supabaseError?.message ??
-       j?.supabaseError?.details ??
-       j?.error?.message ??
-       j?.error ??
-      `Save failed (HTTP ${res.status})`
-    );
-   }
+        j?.supabaseError?.message ??
+          j?.supabaseError?.details ??
+          j?.error?.message ??
+          j?.error ??
+          `Save failed (HTTP ${res.status})`
+      );
+    }
 
     const inv = j.data?.invoice;
     const id = String(inv?.id ?? "").trim();
@@ -468,7 +540,7 @@ export default function NewInvoicePage() {
     setErr("");
     try {
       await saveToServer("DRAFT");
-      setToast("Draft saved successfully.");
+      setToast(isEditMode ? "Draft updated successfully." : "Draft saved successfully.");
       window.setTimeout(() => setToast(null), 2200);
     } catch (e: any) {
       setErr(e?.message || "Failed to save draft");
@@ -501,7 +573,11 @@ export default function NewInvoicePage() {
         );
       }
 
-      window.open(`/sales/invoices/${encodeURIComponent(id)}/print`, "_blank", "noopener,noreferrer");
+      window.open(
+        `/sales/invoices/${encodeURIComponent(id)}/print`,
+        "_blank",
+        "noopener,noreferrer"
+      );
       window.location.href = `/sales/invoices/${encodeURIComponent(id)}`;
     } catch (e: any) {
       setErr(e?.message || "Failed to issue invoice");
@@ -511,34 +587,36 @@ export default function NewInvoicePage() {
   }
 
   React.useEffect(() => {
-  let alive = true;
+    if (isEditMode) return;
 
-  (async () => {
-    try {
-      const j = await safeGet<{ ok: boolean; data?: any }>("/api/settings/company");
-      const s = j?.data ?? {};
+    let alive = true;
 
-      const isProForma = invoiceType === "PRO_FORMA";
-      const prefix = isProForma
-        ? "PFI"
-        : String(s.invoice_prefix ?? "INV").trim() || "INV";
+    (async () => {
+      try {
+        const j = await safeGet<{ ok: boolean; data?: any }>("/api/settings/company");
+        const s = j?.data ?? {};
 
-      const nextNum = isProForma
-        ? 1
-        : Math.max(1, Number(s.next_invoice_no ?? 1) || 1);
+        const isProForma = invoiceType === "PRO_FORMA";
+        const prefix = isProForma
+          ? "PFI"
+          : String(s.invoice_prefix ?? "INV").trim() || "INV";
 
-      if (!alive) return;
-      setInvoiceNo(`${prefix}-${pad4(nextNum)}`);
-    } catch {
-      if (!alive) return;
-      setInvoiceNo(invoiceType === "PRO_FORMA" ? `PFI-${pad4(1)}` : `INV-${pad4(1)}`);
-    }
-  })();
+        const nextNum = isProForma
+          ? 1
+          : Math.max(1, Number(s.next_invoice_no ?? 1) || 1);
 
-  return () => {
-    alive = false;
-  };
-}, [invoiceType]);
+        if (!alive) return;
+        setInvoiceNo(`${prefix}-${pad4(nextNum)}`);
+      } catch {
+        if (!alive) return;
+        setInvoiceNo(invoiceType === "PRO_FORMA" ? `PFI-${pad4(1)}` : `INV-${pad4(1)}`);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [invoiceType, isEditMode]);
 
   React.useEffect(() => {
     let alive = true;
@@ -560,6 +638,97 @@ export default function NewInvoicePage() {
       alive = false;
     };
   }, []);
+
+  React.useEffect(() => {
+    if (!isEditMode || !editId) return;
+
+    let alive = true;
+
+    (async () => {
+      setLoadingExisting(true);
+      setErr("");
+
+      try {
+        const j = await safeGet<InvoiceGetResponse>(
+          `/api/invoices/${encodeURIComponent(editId)}`
+        );
+
+        const inv = j?.data?.invoice ?? null;
+        const its = Array.isArray(j?.data?.items) ? j.data.items : [];
+
+        if (!inv?.id) {
+          throw new Error("Draft invoice not found.");
+        }
+
+        const statusKey = String(inv.status ?? "").toUpperCase();
+
+        if (!alive) return;
+
+        setLoadedInvoiceStatus(statusKey);
+        setInvoiceId(String(inv.id));
+        setInvoiceType(normalizeInvoiceType(inv.invoice_type));
+        setInvoiceNo(String(inv.invoice_no ?? ""));
+        setInvoiceDate(String(inv.invoice_date ?? todayISO()));
+
+        const resolvedCustomerId =
+          inv.customer_id ?? inv.customers?.id ?? null;
+        const resolvedCustomerName =
+          inv.customer_name ?? inv.customers?.name ?? "";
+        const resolvedCustomerVat =
+          inv.customer_vat ?? inv.customers?.vat_no ?? "";
+        const resolvedCustomerBrn =
+          inv.customer_brn ?? inv.customers?.brn ?? "";
+        const resolvedCustomerAddress =
+          inv.customer_address ?? inv.customers?.address ?? "";
+
+        if (
+          resolvedCustomerId !== null &&
+          resolvedCustomerId !== undefined &&
+          String(resolvedCustomerId).trim() !== ""
+        ) {
+          setCustomerMode("LIST");
+          setCustomerId(resolvedCustomerId);
+          setCustQuery(String(resolvedCustomerName || ""));
+        } else {
+          setCustomerMode("MANUAL");
+          setCustomerId(null);
+          setCustQuery(String(resolvedCustomerName || ""));
+        }
+
+        setCustomerName(String(resolvedCustomerName || ""));
+        setCustomerVat(String(resolvedCustomerVat || ""));
+        setCustomerBrn(String(resolvedCustomerBrn || ""));
+        setCustomerAddress(String(resolvedCustomerAddress || ""));
+        setSiteAddress(String(inv.site_address ?? ""));
+
+        if (its.length > 0) {
+          setRows(
+            its.map((item) => ({
+              id: crypto.randomUUID(),
+              description: String(item.description ?? ""),
+              qty: String(item.qty ?? ""),
+              price: String(item.unit_price_excl_vat ?? ""),
+            }))
+          );
+        } else {
+          setRows([{ id: crypto.randomUUID(), description: "", qty: "1", price: "" }]);
+        }
+
+        if (statusKey !== "DRAFT") {
+          setErr("Only draft invoices can be edited.");
+        }
+      } catch (e: any) {
+        if (!alive) return;
+        setErr(e?.message || "Failed to load draft invoice for editing.");
+      } finally {
+        if (alive) setLoadingExisting(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [editId, isEditMode]);
 
   React.useEffect(() => {
     function onDocDown(e: MouseEvent) {
@@ -611,7 +780,7 @@ export default function NewInvoicePage() {
 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [rows, customerId, invoiceNo, invoiceDate, invoiceType, invoiceId]);
+  }, [rows, customerId, invoiceNo, invoiceDate, invoiceType, invoiceId, editLocked]);
 
   function onRowKeyDown(
     e: React.KeyboardEvent,
@@ -653,6 +822,15 @@ export default function NewInvoicePage() {
   }
 
   const showPreview = true;
+  const pageTitle = isEditMode ? "Edit Draft Invoice" : "Create New Invoice";
+  const pageDescription = isEditMode
+    ? "Premium draft invoice editing for KS Contracting with live totals, customer search, and print-ready preview."
+    : "Premium invoice entry for KS Contracting with clean empty numeric fields, customer search, manual customer option, live totals, and print-ready preview.";
+  const saveLabel = isEditMode ? "Save Changes" : "Save Draft";
+  const backHref =
+    isEditMode && invoiceId
+      ? `/sales/invoices/${encodeURIComponent(invoiceId)}`
+      : "/sales/invoices";
 
   return (
     <div className="space-y-5">
@@ -682,15 +860,20 @@ export default function NewInvoicePage() {
                   <Sparkles className="size-3.5 text-white/85" />
                   Premium Workflow
                 </Chip>
+                {isEditMode ? (
+                  <Chip tone="emerald">
+                    <PencilLine className="size-3.5" />
+                    Draft Edit Mode
+                  </Chip>
+                ) : null}
               </div>
 
               <h1 className="mt-3 text-2xl font-extrabold tracking-tight text-white sm:text-3xl xl:text-[2rem]">
-                Create New Invoice
+                {pageTitle}
               </h1>
 
               <p className="mt-2 max-w-4xl text-sm leading-6 text-blue-50/90 sm:text-[15px]">
-                Premium invoice entry for KS Contracting with clean empty numeric fields, customer search,
-                manual customer option, live totals, and print-ready preview.
+                {pageDescription}
               </p>
 
               {invoiceId ? (
@@ -701,7 +884,7 @@ export default function NewInvoicePage() {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Link href="/sales/invoices">
+              <Link href={backHref}>
                 <Button
                   variant="outline"
                   className="h-11 rounded-2xl border-white/20 bg-white/10 px-4 text-white backdrop-blur-sm hover:bg-white/16 hover:text-white"
@@ -714,22 +897,30 @@ export default function NewInvoicePage() {
 
               <Button
                 onClick={onSaveDraft}
-                disabled={busy}
+                disabled={busy || editLocked}
                 variant="outline"
                 className="h-11 rounded-2xl border-white/20 bg-white/10 px-4 text-white backdrop-blur-sm hover:bg-white/16 hover:text-white"
                 title="Ctrl/Cmd + S"
               >
-                {saving ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Save className="mr-2 size-4" />}
-                Save Draft
+                {saving ? (
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                ) : (
+                  <Save className="mr-2 size-4" />
+                )}
+                {saveLabel}
               </Button>
 
               <Button
                 onClick={onIssue}
-                disabled={busy}
+                disabled={busy || editLocked}
                 className="h-11 rounded-2xl bg-[#ff8a1e] px-5 font-semibold text-white shadow-[0_18px_44px_rgba(255,138,30,0.24)] hover:bg-[#f07c0f]"
                 title="Ctrl/Cmd + Enter"
               >
-                {issuing ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Send className="mr-2 size-4" />}
+                {issuing ? (
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                ) : (
+                  <Send className="mr-2 size-4" />
+                )}
                 Issue & Print
               </Button>
             </div>
@@ -743,7 +934,7 @@ export default function NewInvoicePage() {
               </Chip>
               <Chip className="bg-white/12 text-white ring-white/15">
                 <Hash className="size-3.5 text-white/85" />
-                {invoiceNo || "â€”"}
+                {invoiceNo || "—"}
               </Chip>
               <Chip className="bg-white/12 text-white ring-white/15">
                 <Calendar className="size-3.5 text-white/85" />
@@ -758,15 +949,21 @@ export default function NewInvoicePage() {
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <Chip className="bg-white text-slate-700 ring-white/80">
                 <Command className="size-3.5 text-slate-500" />
-                âŒ˜K Customer
+                Ctrl/Cmd + K
               </Chip>
-              <Chip className="bg-white text-slate-700 ring-white/80">âŒ¥N Add Row</Chip>
-              <Chip className="bg-white text-slate-700 ring-white/80">âŒ˜S Save</Chip>
-              <Chip className="bg-white text-slate-700 ring-white/80">âŒ˜â†µ Issue</Chip>
+              <Chip className="bg-white text-slate-700 ring-white/80">Alt + N</Chip>
+              <Chip className="bg-white text-slate-700 ring-white/80">Ctrl/Cmd + S</Chip>
+              <Chip className="bg-white text-slate-700 ring-white/80">Ctrl/Cmd + Enter</Chip>
             </div>
           </div>
         </div>
       </Surface>
+
+      {loadingExisting ? (
+        <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+          Loading draft invoice for editing...
+        </div>
+      ) : null}
 
       {err ? (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -780,7 +977,9 @@ export default function NewInvoicePage() {
             <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <div className="text-base font-bold tracking-tight text-slate-950">Invoice Details</div>
+                  <div className="text-base font-bold tracking-tight text-slate-950">
+                    Invoice Details
+                  </div>
                   <div className="mt-1 text-sm text-slate-600">
                     Executive invoice setup with separate numbering for VAT invoices and pro forma invoices.
                   </div>
@@ -789,7 +988,7 @@ export default function NewInvoicePage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2 xl:grid-cols-3 sm:p-5">
+            <div className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2 sm:p-5 xl:grid-cols-3">
               <div>
                 <IconLabel icon={FileText} label="Invoice Type" />
                 <div className="relative">
@@ -797,7 +996,7 @@ export default function NewInvoicePage() {
                     value={invoiceType}
                     onChange={(e) => setInvoiceType(e.target.value as InvoiceType)}
                     className="h-12 w-full appearance-none rounded-2xl border border-slate-200 bg-white px-4 pr-10 text-sm font-semibold text-slate-900 outline-none transition focus:ring-2 focus:ring-[#ff8a1e]/25"
-                    disabled={busy}
+                    disabled={busy || editLocked}
                   >
                     <option value="VAT_INVOICE">VAT INVOICE</option>
                     <option value="PRO_FORMA">PRO FORMA INVOICE</option>
@@ -812,7 +1011,7 @@ export default function NewInvoicePage() {
                   value={invoiceNo}
                   onChange={(e) => setInvoiceNo(e.target.value)}
                   className="h-12 rounded-2xl font-semibold"
-                  disabled={busy}
+                  disabled={busy || editLocked}
                 />
               </div>
 
@@ -823,7 +1022,7 @@ export default function NewInvoicePage() {
                   value={invoiceDate}
                   onChange={(e) => setInvoiceDate(e.target.value)}
                   className="h-12 rounded-2xl"
-                  disabled={busy}
+                  disabled={busy || editLocked}
                 />
               </div>
             </div>
@@ -833,13 +1032,15 @@ export default function NewInvoicePage() {
             <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-base font-bold tracking-tight text-slate-950">Customer & Site</div>
+                  <div className="text-base font-bold tracking-tight text-slate-950">
+                    Customer & Site
+                  </div>
                   <div className="mt-1 text-sm text-slate-600">
                     Select an existing customer from the list or switch to manual entry.
                   </div>
                 </div>
                 <Chip tone="orange" className="px-2.5 py-1">
-                  âŒ˜K
+                  Ctrl/Cmd + K
                 </Chip>
               </div>
             </div>
@@ -855,6 +1056,7 @@ export default function NewInvoicePage() {
                       ? "bg-[#ff8a1e] text-white ring-[#ff8a1e]"
                       : "bg-white text-slate-700 ring-slate-200 hover:bg-slate-50"
                   )}
+                  disabled={busy || editLocked}
                 >
                   <ListChecks className="size-4" />
                   Select from List
@@ -869,6 +1071,7 @@ export default function NewInvoicePage() {
                       ? "bg-[#071b38] text-white ring-[#071b38]"
                       : "bg-white text-slate-700 ring-slate-200 hover:bg-slate-50"
                   )}
+                  disabled={busy || editLocked}
                 >
                   <PencilLine className="size-4" />
                   Manual Customer
@@ -894,12 +1097,14 @@ export default function NewInvoicePage() {
                       }}
                       onBlur={() => setSpotlight(false)}
                       onKeyDown={onCustomerKeyDown}
-                      placeholder={custLoading ? "Loading customers..." : "Search name, VAT, BRN, address..."}
+                      placeholder={
+                        custLoading ? "Loading customers..." : "Search name, VAT, BRN, address..."
+                      }
                       className={cn(
                         "h-12 rounded-[20px] border-0 bg-transparent pl-10 pr-3 shadow-none",
                         "focus-visible:ring-2 focus-visible:ring-[#ff8a1e]/25"
                       )}
-                      disabled={busy || customerMode === "MANUAL"}
+                      disabled={busy || customerMode === "MANUAL" || editLocked}
                     />
                   </div>
                 </SpotlightShell>
@@ -911,7 +1116,7 @@ export default function NewInvoicePage() {
                         <div className="px-4 py-4 text-sm text-slate-600">No customers found.</div>
                       ) : (
                         filteredCustomers.map((c, idx) => {
-                          const name = c.name ?? c.customer_name ?? "â€”";
+                          const name = c.name ?? c.customer_name ?? "—";
                           const active = idx === custActiveIdx;
 
                           return (
@@ -925,12 +1130,15 @@ export default function NewInvoicePage() {
                                 "w-full border-b border-slate-100 px-4 py-3 text-left transition last:border-b-0",
                                 active ? "bg-[#ff8a1e]/6" : "hover:bg-slate-50"
                               )}
+                              disabled={editLocked}
                             >
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0">
-                                  <div className="truncate text-sm font-semibold text-slate-900">{name}</div>
+                                  <div className="truncate text-sm font-semibold text-slate-900">
+                                    {name}
+                                  </div>
                                   <div className="mt-0.5 truncate text-xs text-slate-600">
-                                    {c.address ? c.address : "â€”"}
+                                    {c.address ? c.address : "—"}
                                   </div>
                                 </div>
                                 <div className="shrink-0 text-right text-xs text-slate-500">
@@ -954,8 +1162,10 @@ export default function NewInvoicePage() {
                     value={customerName}
                     onChange={(e) => setCustomerName(e.target.value)}
                     className="h-12 rounded-2xl"
-                    disabled={busy}
-                    placeholder={customerMode === "MANUAL" ? "Enter customer name" : "Selected customer name"}
+                    disabled={busy || editLocked}
+                    placeholder={
+                      customerMode === "MANUAL" ? "Enter customer name" : "Selected customer name"
+                    }
                   />
                 </div>
 
@@ -965,7 +1175,7 @@ export default function NewInvoicePage() {
                     value={siteAddress}
                     onChange={(e) => setSiteAddress(e.target.value)}
                     className="h-12 rounded-2xl"
-                    disabled={busy}
+                    disabled={busy || editLocked}
                     placeholder="Enter site address"
                   />
                 </div>
@@ -976,7 +1186,7 @@ export default function NewInvoicePage() {
                     value={customerVat}
                     onChange={(e) => setCustomerVat(e.target.value)}
                     className="h-12 rounded-2xl"
-                    disabled={busy}
+                    disabled={busy || editLocked}
                     placeholder="Enter VAT number"
                   />
                 </div>
@@ -987,7 +1197,7 @@ export default function NewInvoicePage() {
                     value={customerBrn}
                     onChange={(e) => setCustomerBrn(e.target.value)}
                     className="h-12 rounded-2xl"
-                    disabled={busy}
+                    disabled={busy || editLocked}
                     placeholder="Enter BRN number"
                   />
                 </div>
@@ -998,7 +1208,7 @@ export default function NewInvoicePage() {
                     value={customerAddress}
                     onChange={(e) => setCustomerAddress(e.target.value)}
                     className="min-h-[96px] w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:ring-2 focus:ring-[#ff8a1e]/25"
-                    disabled={busy}
+                    disabled={busy || editLocked}
                     placeholder="Customer address"
                   />
                 </div>
@@ -1010,7 +1220,9 @@ export default function NewInvoicePage() {
             <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                 <div>
-                  <div className="text-base font-bold tracking-tight text-slate-950">Invoice Items</div>
+                  <div className="text-base font-bold tracking-tight text-slate-950">
+                    Invoice Items
+                  </div>
                   <div className="mt-1 text-sm text-slate-600">
                     All numeric fields stay empty until figures are entered.
                   </div>
@@ -1022,7 +1234,7 @@ export default function NewInvoicePage() {
                   className="h-11 rounded-2xl"
                   onClick={() => addRow("desc")}
                   title="Alt + N"
-                  disabled={busy}
+                  disabled={busy || editLocked}
                 >
                   <Plus className="mr-2 size-4" />
                   Add Item
@@ -1049,8 +1261,8 @@ export default function NewInvoicePage() {
                         type="button"
                         onClick={() => removeRow(r.id)}
                         className={cn(
-                          "grid h-10 w-10 place-items-center rounded-2xl bg-white ring-1 ring-slate-200 text-slate-500 transition hover:bg-slate-100",
-                          busy && "pointer-events-none opacity-60"
+                          "grid h-10 w-10 place-items-center rounded-2xl bg-white text-slate-500 ring-1 ring-slate-200 transition hover:bg-slate-100",
+                          (busy || editLocked) && "pointer-events-none opacity-60"
                         )}
                         aria-label="Remove item"
                         title="Remove"
@@ -1074,7 +1286,7 @@ export default function NewInvoicePage() {
 Supply and installation of false ceiling works as per approved quotation.
 Include labour, fixing accessories, finishing, and site coordination details.
 You can also add phases, materials, quotation reference, and special notes here.`}
-                          disabled={busy}
+                          disabled={busy || editLocked}
                         />
                       </div>
 
@@ -1091,7 +1303,7 @@ You can also add phases, materials, quotation reference, and special notes here.
                           onFocus={(e) => e.currentTarget.select()}
                           onKeyDown={(e) => onRowKeyDown(e, r.id, "qty")}
                           className="h-12 rounded-2xl text-right font-semibold"
-                          disabled={busy}
+                          disabled={busy || editLocked}
                           placeholder="Qty"
                         />
                       </div>
@@ -1109,7 +1321,7 @@ You can also add phases, materials, quotation reference, and special notes here.
                           onFocus={(e) => e.currentTarget.select()}
                           onKeyDown={(e) => onRowKeyDown(e, r.id, "price")}
                           className="h-12 rounded-2xl text-right font-semibold"
-                          disabled={busy}
+                          disabled={busy || editLocked}
                           placeholder="0.00"
                         />
 
@@ -1117,7 +1329,9 @@ You can also add phases, materials, quotation reference, and special notes here.
                           <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
                             Item Amount
                           </div>
-                          <div className="mt-1 text-base font-extrabold text-slate-950">{money(amt)}</div>
+                          <div className="mt-1 text-base font-extrabold text-slate-950">
+                            {money(amt)}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1135,12 +1349,14 @@ You can also add phases, materials, quotation reference, and special notes here.
         </div>
 
         {showPreview && (
-          <div className="2xl:sticky 2xl:top-[92px] h-fit">
+          <div className="h-fit 2xl:sticky 2xl:top-[92px]">
             <Surface>
               <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-base font-bold tracking-tight text-slate-950">Live Preview</div>
+                    <div className="text-base font-bold tracking-tight text-slate-950">
+                      Live Preview
+                    </div>
                     <div className="mt-1 text-sm text-slate-600">
                       Real-time paper-style invoice preview
                     </div>
@@ -1155,12 +1371,18 @@ You can also add phases, materials, quotation reference, and special notes here.
               <div className="p-4 sm:p-5">
                 <div className="overflow-hidden rounded-[24px] border border-slate-300 bg-white">
                   <div className="border-b border-slate-300 px-4 py-5 text-center">
-                    <div className="text-lg font-extrabold text-slate-900">KS CONTRACTING LTD</div>
-                    <div className="mt-1 text-xs text-slate-600">MORCELLEMENT CARLOS, TAMARIN</div>
-                    <div className="text-xs text-slate-600">
-                      Tel: 59416756 â€¢ Email: ks.contracting@hotmail.com
+                    <div className="text-lg font-extrabold text-slate-900">
+                      KS CONTRACTING LTD
                     </div>
-                    <div className="text-xs text-slate-600">BRN: C18160190 â€¢ VAT: 27658608</div>
+                    <div className="mt-1 text-xs text-slate-600">
+                      MORCELLEMENT CARLOS, TAMARIN
+                    </div>
+                    <div className="text-xs text-slate-600">
+                      Tel: 59416756 • Email: ks.contracting@hotmail.com
+                    </div>
+                    <div className="text-xs text-slate-600">
+                      BRN: C18160190 • VAT: 27658608
+                    </div>
                   </div>
 
                   <div className="px-4 py-4">
@@ -1170,7 +1392,9 @@ You can also add phases, materials, quotation reference, and special notes here.
                       </div>
                       <div className="text-right text-sm">
                         <div className="font-semibold text-slate-500">No.</div>
-                        <div className="text-xl font-extrabold text-slate-900">{invoiceNo || "â€”"}</div>
+                        <div className="text-xl font-extrabold text-slate-900">
+                          {invoiceNo || "—"}
+                        </div>
                       </div>
                     </div>
 
@@ -1178,28 +1402,38 @@ You can also add phases, materials, quotation reference, and special notes here.
                       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                         <div>
                           <div className="text-xs text-slate-500">Name</div>
-                          <div className="font-semibold text-slate-900">{customerName || "â€”"}</div>
+                          <div className="font-semibold text-slate-900">
+                            {customerName || "—"}
+                          </div>
                         </div>
                         <div>
                           <div className="text-xs text-slate-500">Date</div>
-                          <div className="font-semibold text-slate-900">{fmtDate(invoiceDate) || "â€”"}</div>
+                          <div className="font-semibold text-slate-900">
+                            {fmtDate(invoiceDate) || "—"}
+                          </div>
                         </div>
                       </div>
 
                       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                         <div>
                           <div className="text-xs text-slate-500">Client's VAT Reg. No.</div>
-                          <div className="font-semibold text-slate-900">{customerVat || "â€”"}</div>
+                          <div className="font-semibold text-slate-900">
+                            {customerVat || "—"}
+                          </div>
                         </div>
                         <div>
                           <div className="text-xs text-slate-500">Client's BRN No.</div>
-                          <div className="font-semibold text-slate-900">{customerBrn || "â€”"}</div>
+                          <div className="font-semibold text-slate-900">
+                            {customerBrn || "—"}
+                          </div>
                         </div>
                       </div>
 
                       <div>
                         <div className="text-xs text-slate-500">Site Address</div>
-                        <div className="font-semibold text-slate-900">{siteAddress || "â€”"}</div>
+                        <div className="font-semibold text-slate-900">
+                          {siteAddress || "—"}
+                        </div>
                       </div>
                     </div>
 
@@ -1214,10 +1448,10 @@ You can also add phases, materials, quotation reference, and special notes here.
                         {rows.map((r) => (
                           <div key={r.id} className="grid grid-cols-12 px-3 py-3 text-xs">
                             <div className="col-span-2 font-semibold text-slate-800">
-                              {String(r.qty).trim() ? r.qty : "â€”"}
+                              {String(r.qty).trim() ? r.qty : "—"}
                             </div>
                             <div className="col-span-7 whitespace-pre-wrap break-words text-slate-800">
-                              {r.description || "â€”"}
+                              {r.description || "—"}
                             </div>
                             <div className="col-span-3 text-right font-bold text-slate-900">
                               {money(qtyForCalc(r.qty) * n2(r.price))}
@@ -1227,7 +1461,7 @@ You can also add phases, materials, quotation reference, and special notes here.
                       </div>
                     </div>
 
-                    <div className="mt-4 ml-auto w-full max-w-[280px] space-y-2 text-sm">
+                    <div className="ml-auto mt-4 w-full max-w-[280px] space-y-2 text-sm">
                       <div className="flex items-center justify-between">
                         <span className="text-slate-600">Sub Total</span>
                         <span className="font-semibold text-slate-900">{money(subtotal)}</span>
@@ -1236,17 +1470,22 @@ You can also add phases, materials, quotation reference, and special notes here.
                         <span className="text-slate-600">VAT 15%</span>
                         <span className="font-semibold text-slate-900">{money(vat)}</span>
                       </div>
-                      <div className="border-t border-slate-300 pt-2 flex items-center justify-between">
+                      <div className="flex items-center justify-between border-t border-slate-300 pt-2">
                         <span className="font-bold text-slate-900">TOTAL</span>
                         <span className="font-extrabold text-slate-900">{money(total)}</span>
                       </div>
                     </div>
 
                     <div className="mt-5 rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-200">
-                      <div className="text-xs font-semibold text-slate-700">Payment Reference</div>
+                      <div className="text-xs font-semibold text-slate-700">
+                        Payment Reference
+                      </div>
                       <div className="mt-1 text-xs text-slate-600">
-                        Please use <span className="font-semibold text-slate-900">{invoiceNo || "â€”"}</span> as
-                        payment reference.
+                        Please use{" "}
+                        <span className="font-semibold text-slate-900">
+                          {invoiceNo || "—"}
+                        </span>{" "}
+                        as payment reference.
                       </div>
                       <div className="mt-1 text-xs text-slate-600">MCB 000446509687</div>
                     </div>
@@ -1260,7 +1499,4 @@ You can also add phases, materials, quotation reference, and special notes here.
     </div>
   );
 }
-
-
-
 

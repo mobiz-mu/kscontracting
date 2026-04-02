@@ -19,6 +19,12 @@ function safeError(err: any) {
   };
 }
 
+function parseSubContractorId(value: string) {
+  const n = Number(String(value ?? "").trim());
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.floor(n);
+}
+
 type Ctx = {
   params: Promise<{ id: string }>;
 };
@@ -26,6 +32,11 @@ type Ctx = {
 export async function GET(_: Request, ctx: Ctx) {
   try {
     const { id } = await ctx.params;
+    const subContractorId = parseSubContractorId(id);
+
+    if (!subContractorId) {
+      return jsonError(400, { error: "Invalid sub contractor id" });
+    }
 
     const supabase = await createSupabaseServerClient();
     const { data: userRes, error: uErr } = await supabase.auth.getUser();
@@ -44,13 +55,19 @@ export async function GET(_: Request, ctx: Ctx) {
       .select(
         "id,name,brn,vat_no,email,phone,address,contact_person,notes,is_active,created_at,updated_at"
       )
-      .eq("id", id)
-      .single();
+      .eq("id", subContractorId)
+      .maybeSingle();
 
     if (error) {
+      return jsonError(500, {
+        error: "Failed to load sub contractor",
+        supabaseError: safeError(error),
+      });
+    }
+
+    if (!data) {
       return jsonError(404, {
         error: "Sub contractor not found",
-        supabaseError: safeError(error),
       });
     }
 
@@ -66,6 +83,11 @@ export async function GET(_: Request, ctx: Ctx) {
 export async function PATCH(req: Request, ctx: Ctx) {
   try {
     const { id } = await ctx.params;
+    const subContractorId = parseSubContractorId(id);
+
+    if (!subContractorId) {
+      return jsonError(400, { error: "Invalid sub contractor id" });
+    }
 
     const supabase = await createSupabaseServerClient();
     const { data: userRes, error: uErr } = await supabase.auth.getUser();
@@ -92,7 +114,9 @@ export async function PATCH(req: Request, ctx: Ctx) {
       email: body.email ? String(body.email).trim() : null,
       phone: body.phone ? String(body.phone).trim() : null,
       address: body.address ? String(body.address).trim() : null,
-      contact_person: body.contact_person ? String(body.contact_person).trim() : null,
+      contact_person: body.contact_person
+        ? String(body.contact_person).trim()
+        : null,
       notes: body.notes ? String(body.notes).trim() : null,
       is_active:
         typeof body.is_active === "boolean" ? body.is_active : true,
@@ -101,16 +125,22 @@ export async function PATCH(req: Request, ctx: Ctx) {
     const { data, error } = await supabaseAdmin
       .from("sub_contractors")
       .update(payload)
-      .eq("id", id)
+      .eq("id", subContractorId)
       .select(
         "id,name,brn,vat_no,email,phone,address,contact_person,notes,is_active,created_at,updated_at"
       )
-      .single();
+      .maybeSingle();
 
     if (error) {
       return jsonError(500, {
         error: "Failed to update sub contractor",
         supabaseError: safeError(error),
+      });
+    }
+
+    if (!data) {
+      return jsonError(404, {
+        error: "Sub contractor not found",
       });
     }
 
@@ -126,6 +156,11 @@ export async function PATCH(req: Request, ctx: Ctx) {
 export async function DELETE(_: Request, ctx: Ctx) {
   try {
     const { id } = await ctx.params;
+    const subContractorId = parseSubContractorId(id);
+
+    if (!subContractorId) {
+      return jsonError(400, { error: "Invalid sub contractor id" });
+    }
 
     const supabase = await createSupabaseServerClient();
     const { data: userRes, error: uErr } = await supabase.auth.getUser();
@@ -139,10 +174,29 @@ export async function DELETE(_: Request, ctx: Ctx) {
 
     const supabaseAdmin = createSupabaseAdminClient();
 
+    const { data: existing, error: existingErr } = await supabaseAdmin
+      .from("sub_contractors")
+      .select("id")
+      .eq("id", subContractorId)
+      .maybeSingle();
+
+    if (existingErr) {
+      return jsonError(500, {
+        error: "Failed to load sub contractor",
+        supabaseError: safeError(existingErr),
+      });
+    }
+
+    if (!existing) {
+      return jsonError(404, {
+        error: "Sub contractor not found",
+      });
+    }
+
     const { error } = await supabaseAdmin
       .from("sub_contractors")
       .delete()
-      .eq("id", id);
+      .eq("id", subContractorId);
 
     if (error) {
       return jsonError(500, {

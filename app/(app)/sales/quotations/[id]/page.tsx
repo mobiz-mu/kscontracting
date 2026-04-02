@@ -13,9 +13,20 @@ import {
   ArrowUpRight,
   Printer,
   XCircle,
+  PencilLine,
+  Sparkles,
+  RefreshCw,
+  ReceiptText,
+  Clock3,
+  BadgeCheck,
+  Percent,
+  MapPin,
+  Hash,
+  Send,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 type QuoteItem = {
   id: number | string;
@@ -79,14 +90,152 @@ function statusClasses(status?: string | null) {
   const s = String(status ?? "").toUpperCase();
 
   if (s === "ACCEPTED") {
-    return "bg-emerald-50 text-emerald-700 ring-emerald-200";
+    return "bg-emerald-50 text-emerald-700 border-emerald-200";
   }
-
   if (s === "VOID") {
-    return "bg-rose-50 text-rose-700 ring-rose-200";
+    return "bg-rose-50 text-rose-700 border-rose-200";
+  }
+  if (s === "DRAFT") {
+    return "bg-amber-50 text-amber-800 border-amber-200";
   }
 
-  return "bg-slate-50 text-slate-700 ring-slate-200";
+  return "bg-slate-50 text-slate-700 border-slate-200";
+}
+
+function Surface({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "relative overflow-hidden rounded-[24px] border border-slate-200/80 bg-white",
+        "shadow-[0_1px_0_rgba(15,23,42,0.04),0_16px_40px_rgba(15,23,42,0.06)]",
+        className
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+function MiniStat({
+  icon: Icon,
+  label,
+  value,
+  tone = "slate",
+}: {
+  icon: React.ElementType;
+  label: string;
+  value: string;
+  tone?: "slate" | "navy" | "orange" | "emerald";
+}) {
+  const tones: Record<string, string> = {
+    slate: "bg-slate-50 ring-slate-200 text-slate-900",
+    navy: "bg-[#071b38] text-white ring-white/10",
+    orange: "bg-[#ff7a18] text-white ring-white/10",
+    emerald: "bg-emerald-50 ring-emerald-200 text-emerald-900",
+  };
+
+  return (
+    <div className={cn("rounded-[20px] p-4 ring-1", tones[tone])}>
+      <div className="flex items-center gap-2">
+        <Icon
+          className={cn(
+            "size-4",
+            tone === "navy" || tone === "orange" ? "text-white/80" : "text-slate-500"
+          )}
+        />
+        <div
+          className={cn(
+            "text-[10px] font-bold uppercase tracking-[0.18em]",
+            tone === "navy" || tone === "orange" ? "text-white/70" : "text-slate-500"
+          )}
+        >
+          {label}
+        </div>
+      </div>
+      <div
+        className={cn(
+          "mt-3 text-xl font-extrabold tracking-tight",
+          tone === "navy" || tone === "orange" ? "text-white" : "text-slate-950"
+        )}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function InfoRow({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: React.ElementType;
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="grid size-8 shrink-0 place-items-center rounded-xl bg-slate-50 ring-1 ring-slate-200">
+        <Icon className="size-4 text-slate-500" />
+      </div>
+      <div className="min-w-0">
+        <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
+          {label}
+        </div>
+        <div className="mt-1 break-words text-sm font-semibold text-slate-900">
+          {value}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CompactActionButton({
+  icon: Icon,
+  label,
+  onClick,
+  disabled,
+  loading,
+  variant = "outline",
+  className,
+}: {
+  icon: React.ElementType;
+  label: string;
+  onClick?: () => void;
+  disabled?: boolean;
+  loading?: boolean;
+  variant?: "outline" | "solid";
+  className?: string;
+}) {
+  return (
+    <Button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      variant="outline"
+      className={cn(
+        "h-9 rounded-xl px-3 text-xs font-semibold",
+        variant === "outline" &&
+          "border-slate-200 bg-white/80 text-slate-700 hover:bg-slate-50",
+        variant === "solid" &&
+          "border-transparent bg-[#071b38] text-white hover:bg-[#0b2347]",
+        className
+      )}
+    >
+      {loading ? (
+        <RefreshCw className="mr-2 size-3.5 animate-spin" />
+      ) : (
+        <Icon className="mr-2 size-3.5" />
+      )}
+      {label}
+    </Button>
+  );
 }
 
 export default function QuotationDetailsPage() {
@@ -98,8 +247,8 @@ export default function QuotationDetailsPage() {
   const [accepting, setAccepting] = React.useState(false);
   const [voiding, setVoiding] = React.useState(false);
   const [error, setError] = React.useState("");
-
   const [quote, setQuote] = React.useState<Quote | null>(null);
+  const [lastSync, setLastSync] = React.useState<Date | null>(null);
 
   async function load() {
     try {
@@ -114,6 +263,7 @@ export default function QuotationDetailsPage() {
       }
 
       setQuote((json.data ?? null) as Quote);
+      setLastSync(new Date());
     } catch (e: any) {
       setError(e?.message || "Failed to load quotation");
       setQuote(null);
@@ -188,12 +338,13 @@ export default function QuotationDetailsPage() {
     }
   }
 
+  function goToEditDraft() {
+    if (!quote?.id) return;
+    router.push(`/sales/quotations/new?edit=${encodeURIComponent(quote.id)}`);
+  }
+
   if (loading) {
-    return (
-      <div className="p-8 text-sm text-slate-500">
-        Loading quotation...
-      </div>
-    );
+    return <div className="p-8 text-sm text-slate-500">Loading quotation...</div>;
   }
 
   if (!quote) {
@@ -206,286 +357,431 @@ export default function QuotationDetailsPage() {
 
   const status = String(quote.status ?? "DRAFT").toUpperCase();
   const canAccept = status === "DRAFT";
+  const canEdit = status === "DRAFT";
   const canConvert = status === "ACCEPTED" && !quote.converted_invoice_id;
   const alreadyConverted = !!quote.converted_invoice_id;
 
   return (
-    <div className="space-y-5">
-      <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white">
-        <div className="absolute inset-0 bg-[radial-gradient(900px_460px_at_12%_-20%,rgba(7,27,56,0.12),transparent_60%),radial-gradient(700px_420px_at_110%_-10%,rgba(255,122,24,0.12),transparent_60%),linear-gradient(180deg,rgba(248,250,252,1),rgba(255,255,255,1))]" />
-        <div className="relative px-5 py-5 sm:px-7 sm:py-6">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-            <div>
-              <Link
-                href="/sales/quotations"
-                className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-800"
-              >
-                <ArrowLeft size={16} />
-                Back to quotations
-              </Link>
+    <div className="space-y-4">
+      <Surface className="overflow-hidden">
+        <div className="absolute inset-0 bg-[linear-gradient(135deg,#071b38_0%,#0d2c59_55%,#163d73_100%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(780px_260px_at_-5%_-10%,rgba(255,255,255,0.14),transparent_55%),radial-gradient(520px_220px_at_110%_0%,rgba(255,153,51,0.16),transparent_48%)]" />
 
-              <h1 className="mt-2 text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl">
-                Quotation Details
-              </h1>
-
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                <span className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-3 py-1 font-semibold text-slate-700 ring-1 ring-slate-200">
-                  <FileText className="size-3.5 text-slate-500" />
-                  {quote.quote_no || quote.quotation_no || "—"}
-                </span>
+        <div className="relative px-4 py-4 sm:px-5 sm:py-5 xl:px-6">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <CompactActionButton
+                  icon={ArrowLeft}
+                  label="Back"
+                  onClick={() => router.push("/sales/quotations")}
+                  className="border-white/15 bg-white/10 text-white hover:bg-white/15 hover:text-white"
+                />
 
                 <span
-                  className={`inline-flex items-center gap-2 rounded-full px-3 py-1 font-semibold ring-1 ${statusClasses(status)}`}
+                  className={cn(
+                    "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold backdrop-blur-sm",
+                    statusClasses(status)
+                  )}
                 >
-                  <CheckCircle2 className="size-3.5" />
                   {status}
                 </span>
 
-                {alreadyConverted ? (
-                  <span className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 font-semibold text-blue-700 ring-1 ring-blue-200">
-                    <ArrowUpRight className="size-3.5" />
-                    Converted
+                <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-semibold text-white ring-1 ring-white/15">
+                  <ReceiptText className="size-3.5 text-white/85" />
+                  QUOTATION
+                </span>
+
+                {lastSync ? (
+                  <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-semibold text-white ring-1 ring-white/15">
+                    <Clock3 className="size-3.5 text-white/85" />
+                    {lastSync.toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                ) : null}
+
+                <span className="inline-flex items-center gap-2 rounded-full bg-[#ff8a1e]/14 px-2.5 py-1 text-[11px] font-semibold text-[#ffd6ad] ring-1 ring-[#ffb266]/20">
+                  <BadgeCheck className="size-3.5" />
+                  KS Contracting
+                </span>
+              </div>
+
+              <div className="mt-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                <div className="min-w-0">
+                  <h1 className="truncate text-[28px] font-extrabold tracking-tight text-white sm:text-[32px]">
+                    {quote.quote_no || quote.quotation_no || "Quotation Details"}
+                  </h1>
+                  <div className="mt-1 text-sm text-blue-50/90">
+                    {quote.customer_name || "—"}
+                  </div>
+                </div>
+
+                <div className="mt-2 flex flex-wrap gap-2 sm:mt-0">
+                  <CompactActionButton
+                    icon={RefreshCw}
+                    label="Refresh"
+                    onClick={() => void load()}
+                    disabled={loading}
+                    loading={loading}
+                    className="border-white/15 bg-white/10 text-white hover:bg-white/15 hover:text-white"
+                  />
+
+                  <CompactActionButton
+                    icon={Printer}
+                    label="Print"
+                    onClick={() =>
+                      window.open(
+                        `/sales/quotations/${encodeURIComponent(quote.id)}/print`,
+                        "_blank",
+                        "noopener,noreferrer"
+                      )
+                    }
+                    className="border-white/15 bg-white/10 text-white hover:bg-white/15 hover:text-white"
+                  />
+
+                  {canEdit ? (
+                    <CompactActionButton
+                      icon={PencilLine}
+                      label="Edit Draft"
+                      onClick={goToEditDraft}
+                      className="border-white/15 bg-white/10 text-white hover:bg-white/15 hover:text-white"
+                    />
+                  ) : null}
+
+                  {canAccept ? (
+                    <CompactActionButton
+                      icon={CheckCircle2}
+                      label="Accept"
+                      onClick={() => void acceptQuote()}
+                      disabled={accepting}
+                      loading={accepting}
+                      variant="solid"
+                      className="bg-emerald-600 text-white hover:bg-emerald-700"
+                    />
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-blue-50/85">
+                <span className="inline-flex items-center gap-1.5">
+                  <Calendar className="size-3.5 text-blue-100/80" />
+                  {fmtDate(quote.quote_date)}
+                </span>
+
+                <span className="inline-flex items-center gap-1.5">
+                  <Calendar className="size-3.5 text-blue-100/80" />
+                  Valid until {fmtDate(quote.valid_until)}
+                </span>
+
+                {quote.site_address ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <MapPin className="size-3.5 text-blue-100/80" />
+                    {quote.site_address}
                   </span>
                 ) : null}
               </div>
-            </div>
 
-            <div className="flex flex-wrap gap-2">
-              <Link href={`/sales/quotations/${encodeURIComponent(quote.id)}/print`}>
-                <Button variant="outline" className="rounded-2xl">
-                  <Printer className="mr-2 size-4" />
-                  Print Quotation
-                </Button>
-              </Link>
-
-              {canAccept ? (
-                <Button
-                  className="rounded-2xl bg-emerald-600 text-white hover:bg-emerald-700"
-                  onClick={() => void acceptQuote()}
-                  disabled={accepting}
-                >
-                  {accepting ? (
-                    <Loader2 className="mr-2 size-4 animate-spin" />
-                  ) : (
-                    <CheckCircle2 className="mr-2 size-4" />
-                  )}
-                  Accept Quote
-                </Button>
-              ) : null}
-
-              {canConvert ? (
-                <Link href={`/sales/quotations/${encodeURIComponent(quote.id)}/convert`}>
-                  <Button className="rounded-2xl bg-[#071b38] text-white hover:bg-[#06142b]">
-                    <FileText className="mr-2 size-4" />
-                    Convert to Invoice
-                  </Button>
-                </Link>
-              ) : null}
-
-              {alreadyConverted ? (
-                <Link href={`/sales/invoices/${encodeURIComponent(String(quote.converted_invoice_id))}`}>
-                  <Button className="rounded-2xl bg-[#071b38] text-white hover:bg-[#06142b]">
-                    <ArrowUpRight className="mr-2 size-4" />
-                    Open Invoice
-                  </Button>
-                </Link>
-              ) : null}
-
-              {status !== "VOID" ? (
-                <Button
-                  variant="outline"
-                  className="rounded-2xl border-rose-200 text-rose-700 hover:bg-rose-50"
-                  onClick={() => void voidQuote()}
-                  disabled={voiding}
-                >
-                  {voiding ? (
-                    <Loader2 className="mr-2 size-4 animate-spin" />
-                  ) : (
-                    <XCircle className="mr-2 size-4" />
-                  )}
-                  Void Quote
-                </Button>
+              {canEdit ? (
+                <div className="mt-3 rounded-2xl border border-[#ffbe82]/25 bg-[linear-gradient(135deg,rgba(255,255,255,0.14)_0%,rgba(255,231,204,0.12)_45%,rgba(255,155,61,0.16)_100%)] px-3 py-2.5 backdrop-blur-sm">
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-white/95">
+                    <Sparkles className="size-3.5 text-[#ffd6ad]" />
+                    <span className="font-semibold">Draft quotation.</span>
+                    <span className="text-white/80">
+                      You can still edit customer details, site address, items and notes before accepting.
+                    </span>
+                  </div>
+                </div>
               ) : null}
             </div>
           </div>
+
+          {error ? (
+            <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              {error}
+            </div>
+          ) : null}
         </div>
+      </Surface>
+
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <MiniStat icon={FileText} label="Subtotal" value={money(quote.subtotal)} />
+        <MiniStat icon={Percent} label="VAT" value={money(quote.vat_amount)} />
+        <MiniStat icon={ReceiptText} label="Total" value={money(quote.total_amount)} tone="navy" />
+        <MiniStat
+          icon={alreadyConverted ? ArrowUpRight : status === "ACCEPTED" ? CheckCircle2 : XCircle}
+          label="State"
+          value={alreadyConverted ? "Converted" : status}
+          tone={alreadyConverted || status === "ACCEPTED" ? "emerald" : canEdit ? "orange" : "slate"}
+        />
       </div>
 
-      {status === "DRAFT" ? (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          This document is still a quotation. It will remain a quote until you accept it. Only accepted quotations can be converted to invoice.
-        </div>
-      ) : null}
-
-      {error ? (
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          {error}
-        </div>
-      ) : null}
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_360px]">
+      <div className="grid grid-cols-1 gap-4 2xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="space-y-4">
-          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-[0_1px_0_rgba(15,23,42,0.05),0_18px_45px_rgba(15,23,42,0.08)]">
-            <div className="text-sm font-semibold text-slate-500">Customer</div>
-            <div className="mt-1 text-lg font-extrabold text-slate-900">
-              {quote.customer_name || "—"}
-            </div>
-
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                <div className="text-xs text-slate-500">VAT No.</div>
-                <div className="mt-1 font-semibold text-slate-900">
-                  {quote.customer_vat || "—"}
+          <Surface>
+            <div className="border-b border-slate-200 px-4 py-3 sm:px-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-bold tracking-tight text-slate-950">
+                    Quotation Summary
+                  </div>
+                  <div className="mt-0.5 text-xs text-slate-500">
+                    Compact executive client and commercial overview
+                  </div>
                 </div>
-              </div>
 
-              <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                <div className="text-xs text-slate-500">BRN No.</div>
-                <div className="mt-1 font-semibold text-slate-900">
-                  {quote.customer_brn || "—"}
-                </div>
-              </div>
-
-              <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200 sm:col-span-2">
-                <div className="text-xs text-slate-500">Address</div>
-                <div className="mt-1 whitespace-pre-wrap font-semibold text-slate-900">
-                  {quote.customer_address || "—"}
-                </div>
-              </div>
-
-              <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200 sm:col-span-2">
-                <div className="text-xs text-slate-500">Site Address</div>
-                <div className="mt-1 whitespace-pre-wrap font-semibold text-slate-900">
-                  {quote.site_address || "—"}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
+                    Items {(quote.items ?? []).length}
+                  </span>
+                  {alreadyConverted ? (
+                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+                      Converted
+                    </span>
+                  ) : null}
                 </div>
               </div>
             </div>
-          </div>
 
-          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-[0_1px_0_rgba(15,23,42,0.05),0_18px_45px_rgba(15,23,42,0.08)]">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-base font-extrabold text-slate-900">
-                Quotation Items
+            <div className="grid gap-4 p-4 sm:p-5 lg:grid-cols-2">
+              <div className="space-y-4">
+                <InfoRow
+                  icon={Building2}
+                  label="Customer"
+                  value={quote.customer_name || "—"}
+                />
+                <InfoRow
+                  icon={MapPin}
+                  label="Customer Address"
+                  value={quote.customer_address || "—"}
+                />
+                {quote.site_address ? (
+                  <InfoRow
+                    icon={MapPin}
+                    label="Site Address"
+                    value={quote.site_address}
+                  />
+                ) : null}
               </div>
-              <div className="text-xs font-semibold text-slate-500">
-                {(quote.items ?? []).length} item(s)
+
+              <div className="space-y-4">
+                <InfoRow
+                  icon={Calendar}
+                  label="Quotation Date"
+                  value={fmtDate(quote.quote_date)}
+                />
+                <InfoRow
+                  icon={Calendar}
+                  label="Valid Until"
+                  value={fmtDate(quote.valid_until)}
+                />
+                {quote.customer_vat ? (
+                  <InfoRow
+                    icon={Percent}
+                    label="Client VAT No."
+                    value={quote.customer_vat}
+                  />
+                ) : null}
+                {quote.customer_brn ? (
+                  <InfoRow
+                    icon={Hash}
+                    label="Client BRN No."
+                    value={quote.customer_brn}
+                  />
+                ) : null}
+              </div>
+            </div>
+          </Surface>
+
+          <Surface>
+            <div className="border-b border-slate-200 px-4 py-3 sm:px-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-bold tracking-tight text-slate-950">
+                    Quotation Items
+                  </div>
+                  <div className="mt-0.5 text-xs text-slate-500">
+                    Full line breakdown
+                  </div>
+                </div>
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
+                  {(quote.items ?? []).length} line{(quote.items ?? []).length === 1 ? "" : "s"}
+                </span>
               </div>
             </div>
 
-            <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
-              <div className="hidden grid-cols-12 bg-slate-50 px-4 py-3 text-xs font-bold uppercase tracking-[0.14em] text-slate-500 md:grid">
-                <div className="col-span-7">Description</div>
-                <div className="col-span-1 text-right">Qty</div>
-                <div className="col-span-2 text-right">Price</div>
-                <div className="col-span-2 text-right">Total</div>
-              </div>
+            <div className="p-4 sm:p-5">
+              {(quote.items ?? []).length === 0 ? (
+                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-12 text-center text-slate-500">
+                  No items found for this quotation.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {(quote.items ?? []).map((item, index) => (
+                    <div
+                      key={String(item.id)}
+                      className="rounded-[20px] border border-slate-200 bg-white p-4"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="mb-2 inline-flex rounded-full bg-slate-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500 ring-1 ring-slate-200">
+                            Item {index + 1}
+                          </div>
 
-              <div className="divide-y divide-slate-200 bg-white">
-                {(quote.items ?? []).map((item) => (
-                  <div key={String(item.id)} className="px-4 py-4">
-                    <div className="grid gap-3 md:grid-cols-12 md:items-start">
-                      <div className="md:col-span-7">
-                        <div className="whitespace-pre-wrap text-sm font-medium text-slate-900">
-                          {item.description}
+                          <div className="whitespace-pre-wrap break-words text-sm font-semibold leading-6 text-slate-900">
+                            {item.description}
+                          </div>
+                        </div>
+
+                        <div className="shrink-0 rounded-2xl bg-[#071b38] px-3 py-2 text-right">
+                          <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/70">
+                            Amount
+                          </div>
+                          <div className="mt-1 text-sm font-extrabold text-white">
+                            {money(item.line_total)}
+                          </div>
                         </div>
                       </div>
 
-                      <div className="text-sm text-slate-700 md:col-span-1 md:text-right">
-                        <span className="text-slate-500 md:hidden">Qty: </span>
-                        {n2(item.qty)}
-                      </div>
+                      <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                        <div className="rounded-2xl bg-slate-50 p-3">
+                          <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                            Qty
+                          </div>
+                          <div className="mt-1 text-sm font-bold text-slate-900">
+                            {n2(item.qty)}
+                          </div>
+                        </div>
 
-                      <div className="text-sm text-slate-700 md:col-span-2 md:text-right">
-                        <span className="text-slate-500 md:hidden">Price: </span>
-                        {money(item.unit_price_excl_vat)}
-                      </div>
+                        <div className="rounded-2xl bg-slate-50 p-3">
+                          <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                            Unit Price
+                          </div>
+                          <div className="mt-1 text-sm font-bold text-slate-900">
+                            {money(item.unit_price_excl_vat)}
+                          </div>
+                        </div>
 
-                      <div className="text-sm font-extrabold text-slate-900 md:col-span-2 md:text-right">
-                        <span className="text-slate-500 md:hidden">Total: </span>
-                        {money(item.line_total)}
+                        <div className="rounded-2xl bg-slate-50 p-3">
+                          <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                            VAT
+                          </div>
+                          <div className="mt-1 text-sm font-bold text-slate-900">
+                            {money(item.vat_amount)}
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl bg-slate-50 p-3">
+                          <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                            VAT Rate
+                          </div>
+                          <div className="mt-1 text-sm font-bold text-slate-900">
+                            {Math.round(n2(item.vat_rate) * 100)}%
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {quote.notes ? (
-              <div className="mt-4 rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                <div className="text-xs text-slate-500">Notes</div>
-                <div className="mt-1 whitespace-pre-wrap font-semibold text-slate-900">
-                  {quote.notes}
+                  ))}
                 </div>
-              </div>
-            ) : null}
-          </div>
+              )}
+
+              {quote.notes ? (
+                <div className="mt-4 rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
+                  <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                    Notes
+                  </div>
+                  <div className="mt-2 whitespace-pre-wrap text-sm font-medium text-slate-700">
+                    {quote.notes}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </Surface>
         </div>
 
         <div className="space-y-4">
-          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-[0_1px_0_rgba(15,23,42,0.05),0_18px_45px_rgba(15,23,42,0.08)]">
-            <div className="text-base font-extrabold text-slate-900">
-              Quotation Summary
-            </div>
-
-            <div className="mt-4 space-y-4">
-              <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  <Calendar className="size-4 text-slate-400" />
-                  Quotation Date
+          <Surface className="2xl:sticky 2xl:top-[88px]">
+            <div className="border-b border-slate-200 px-4 py-3 sm:px-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-bold tracking-tight text-slate-950">
+                    Actions
+                  </div>
+                  <div className="mt-0.5 text-xs text-slate-500">
+                    Compact quotation workflow controls
+                  </div>
                 </div>
-                <div className="font-semibold text-slate-900">
-                  {fmtDate(quote.quote_date)}
-                </div>
-              </div>
-
-              <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  <Calendar className="size-4 text-slate-400" />
-                  Valid Until
-                </div>
-                <div className="font-semibold text-slate-900">
-                  {fmtDate(quote.valid_until)}
-                </div>
-              </div>
-
-              <div className="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
-                <div className="text-xs text-slate-500">Status</div>
-                <div className="mt-1 font-semibold text-slate-900">{status}</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-[0_1px_0_rgba(15,23,42,0.05),0_18px_45px_rgba(15,23,42,0.08)]">
-            <div className="flex items-center gap-2 text-sm font-semibold text-slate-500">
-              <Building2 className="size-4 text-slate-400" />
-              Totals
-            </div>
-
-            <div className="mt-4 space-y-3">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-slate-600">Subtotal</span>
-                <span className="font-semibold text-slate-900">
-                  {money(quote.subtotal)}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-slate-600">VAT</span>
-                <span className="font-semibold text-slate-900">
-                  {money(quote.vat_amount)}
-                </span>
-              </div>
-
-              <div className="h-px bg-slate-200" />
-
-              <div className="flex items-center justify-between text-lg font-extrabold">
-                <span className="text-slate-900">Total</span>
-                <span className="text-slate-900">
-                  {money(quote.total_amount)}
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
+                  {status}
                 </span>
               </div>
             </div>
-          </div>
+
+            <div className="space-y-3 p-4 sm:p-5">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 2xl:grid-cols-1">
+                {canEdit ? (
+                  <CompactActionButton
+                    icon={PencilLine}
+                    label="Edit Draft"
+                    onClick={goToEditDraft}
+                    className="w-full justify-start"
+                  />
+                ) : null}
+
+                {canAccept ? (
+                  <CompactActionButton
+                    icon={CheckCircle2}
+                    label="Accept Quote"
+                    onClick={() => void acceptQuote()}
+                    disabled={accepting}
+                    loading={accepting}
+                    variant="solid"
+                    className="w-full justify-start bg-emerald-600 text-white hover:bg-emerald-700"
+                  />
+                ) : null}
+
+                {canConvert ? (
+                  <CompactActionButton
+                    icon={Send}
+                    label="Convert to Invoice"
+                    onClick={() =>
+                      router.push(`/sales/quotations/${encodeURIComponent(quote.id)}/convert`)
+                    }
+                    variant="solid"
+                    className="w-full justify-start"
+                  />
+                ) : null}
+
+                {alreadyConverted ? (
+                  <CompactActionButton
+                    icon={ArrowUpRight}
+                    label="Open Invoice"
+                    onClick={() =>
+                      router.push(
+                        `/sales/invoices/${encodeURIComponent(
+                          String(quote.converted_invoice_id)
+                        )}`
+                      )
+                    }
+                    variant="solid"
+                    className="w-full justify-start"
+                  />
+                ) : null}
+
+                {status !== "VOID" ? (
+                  <CompactActionButton
+                    icon={XCircle}
+                    label="Void Quote"
+                    onClick={() => void voidQuote()}
+                    disabled={voiding}
+                    loading={voiding}
+                    className="w-full justify-start border-rose-200 text-rose-700 hover:bg-rose-50"
+                  />
+                ) : null}
+              </div>
+            </div>
+          </Surface>
         </div>
       </div>
     </div>

@@ -22,7 +22,9 @@ function safeError(err: any) {
 }
 
 function isUuid(v: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    v
+  );
 }
 
 function normalizeStatus(v: any) {
@@ -30,6 +32,10 @@ function normalizeStatus(v: any) {
   if (s === "ACCEPTED") return "ACCEPTED";
   if (s === "VOID") return "VOID";
   return "DRAFT";
+}
+
+function isDraftStatus(v: any) {
+  return String(v ?? "").trim().toUpperCase() === "DRAFT";
 }
 
 export async function GET(_request: NextRequest, { params }: Ctx) {
@@ -83,6 +89,7 @@ export async function GET(_request: NextRequest, { params }: Ctx) {
         converted_invoice_id
       `)
       .eq("id", safeId)
+      .eq("created_by", userRes.user.id)
       .maybeSingle();
 
     if (quoteErr) {
@@ -94,10 +101,6 @@ export async function GET(_request: NextRequest, { params }: Ctx) {
 
     if (!quote) {
       return jsonError(404, { error: "Quotation not found" });
-    }
-
-    if (String(quote.created_by) !== String(userRes.user.id)) {
-      return jsonError(403, { error: "Forbidden" });
     }
 
     let linkedCustomer: {
@@ -147,6 +150,12 @@ export async function GET(_request: NextRequest, { params }: Ctx) {
       });
     }
 
+    const statusKey = String(quote.status ?? "DRAFT").toUpperCase();
+    const isDraft = statusKey === "DRAFT";
+    const isAccepted = statusKey === "ACCEPTED";
+    const isVoid = statusKey === "VOID";
+    const isConverted = !!quote.converted_invoice_id;
+
     return NextResponse.json({
       ok: true,
       data: {
@@ -158,7 +167,8 @@ export async function GET(_request: NextRequest, { params }: Ctx) {
         customer_name: linkedCustomer?.name ?? quote.customer_name ?? null,
         customer_vat: linkedCustomer?.vat_no ?? quote.customer_vat ?? null,
         customer_brn: linkedCustomer?.brn ?? quote.customer_brn ?? null,
-        customer_address: linkedCustomer?.address ?? quote.customer_address ?? null,
+        customer_address:
+          linkedCustomer?.address ?? quote.customer_address ?? null,
 
         quote_date: quote.quote_date ?? null,
         valid_until: quote.valid_until ?? null,
@@ -174,6 +184,10 @@ export async function GET(_request: NextRequest, { params }: Ctx) {
         created_at: quote.created_at ?? null,
         updated_at: quote.updated_at ?? null,
         converted_invoice_id: quote.converted_invoice_id ?? null,
+
+        can_edit_draft: isDraft && !isConverted && !isVoid,
+        can_accept: isDraft && !isConverted && !isVoid,
+        can_convert: isAccepted && !isConverted && !isVoid,
 
         items:
           (items ?? []).map((item: any) => ({
@@ -232,6 +246,7 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
         converted_invoice_id
       `)
       .eq("id", safeId)
+      .eq("created_by", userRes.user.id)
       .maybeSingle();
 
     if (existingErr) {
@@ -245,15 +260,42 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
       return jsonError(404, { error: "Quotation not found" });
     }
 
-    if (String(existing.created_by) !== String(userRes.user.id)) {
-      return jsonError(403, { error: "Forbidden" });
-    }
-
+    const currentStatus = String(existing.status ?? "DRAFT").toUpperCase();
     const nextStatus = normalizeStatus(body.status);
 
     if (existing.converted_invoice_id && nextStatus !== "VOID") {
       return jsonError(400, {
-        error: "Converted quotations cannot be changed except voiding if your business allows it",
+        error:
+          "Converted quotations cannot be changed except voiding if your business allows it",
+      });
+    }
+
+    if (currentStatus === "VOID" && nextStatus !== "VOID") {
+      return jsonError(400, {
+        error: "Void quotations cannot be changed",
+      });
+    }
+
+    if (nextStatus === "ACCEPTED" && currentStatus !== "DRAFT") {
+      return jsonError(400, {
+        error: "Only draft quotations can be accepted",
+      });
+    }
+
+    if (nextStatus === "DRAFT" && currentStatus !== "DRAFT") {
+      return jsonError(400, {
+        error: "Only draft quotations can remain draft",
+      });
+    }
+
+    if (
+      nextStatus === "VOID" &&
+      currentStatus !== "DRAFT" &&
+      currentStatus !== "ACCEPTED" &&
+      currentStatus !== "VOID"
+    ) {
+      return jsonError(400, {
+        error: "This quotation cannot be voided",
       });
     }
 
@@ -297,9 +339,20 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
       });
     }
 
+    const updatedStatus = String(updated.status ?? "DRAFT").toUpperCase();
+    const updatedIsDraft = updatedStatus === "DRAFT";
+    const updatedIsAccepted = updatedStatus === "ACCEPTED";
+    const updatedIsVoid = updatedStatus === "VOID";
+    const updatedIsConverted = !!updated.converted_invoice_id;
+
     return NextResponse.json({
       ok: true,
-      data: updated,
+      data: {
+        ...updated,
+        can_edit_draft: updatedIsDraft && !updatedIsConverted && !updatedIsVoid,
+        can_accept: updatedIsDraft && !updatedIsConverted && !updatedIsVoid,
+        can_convert: updatedIsAccepted && !updatedIsConverted && !updatedIsVoid,
+      },
     });
   } catch (e: any) {
     console.error("[PATCH /api/quotations/[id]] fatal", e);

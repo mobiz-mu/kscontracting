@@ -1,5 +1,9 @@
+
 import { NextResponse } from "next/server";
-import { createSupabaseServerClient, createSupabaseAdminClient } from "@/lib/supabase/server";
+import {
+  createSupabaseServerClient,
+  createSupabaseAdminClient,
+} from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
@@ -74,7 +78,9 @@ async function getNextFreeInvoiceNo(
     .ilike("invoice_no", `${prefix}-%`);
 
   if (error) {
-    throw new Error(error?.message ?? "Failed to inspect existing invoice numbers");
+    throw new Error(
+      error?.message ?? "Failed to inspect existing invoice numbers"
+    );
   }
 
   const filtered = (existingRows ?? []).filter((x: any) =>
@@ -117,7 +123,10 @@ export async function POST(req: Request) {
     const { data: userRes, error: uErr } = await supabase.auth.getUser();
 
     if (uErr || !userRes.user) {
-      return jsonError(401, { error: "Unauthorized", supabaseError: safeError(uErr) });
+      return jsonError(401, {
+        error: "Unauthorized",
+        supabaseError: safeError(uErr),
+      });
     }
 
     const body = await req.json().catch(() => ({}));
@@ -133,23 +142,34 @@ export async function POST(req: Request) {
         : Number(rawCustomerId);
 
     const customer_name =
-      typeof body.customer_name === "string" ? body.customer_name.trim() || null : null;
+      typeof body.customer_name === "string"
+        ? body.customer_name.trim() || null
+        : null;
 
     const customer_vat =
-      typeof body.customer_vat === "string" ? body.customer_vat.trim() || null : null;
+      typeof body.customer_vat === "string"
+        ? body.customer_vat.trim() || null
+        : null;
 
     const customer_brn =
-      typeof body.customer_brn === "string" ? body.customer_brn.trim() || null : null;
+      typeof body.customer_brn === "string"
+        ? body.customer_brn.trim() || null
+        : null;
 
     const customer_address =
-      typeof body.customer_address === "string" ? body.customer_address.trim() || null : null;
+      typeof body.customer_address === "string"
+        ? body.customer_address.trim() || null
+        : null;
 
     const invoice_date = String(body.invoice_date ?? "").trim();
     if (!invoice_date) {
-      return jsonError(400, { error: "invoice_date is required (yyyy-mm-dd)" });
+      return jsonError(400, {
+        error: "invoice_date is required (yyyy-mm-dd)",
+      });
     }
 
-    const hasCustomerId = Number.isFinite(customerIdNum as number) && (customerIdNum as number) > 0;
+    const hasCustomerId =
+      Number.isFinite(customerIdNum as number) && (customerIdNum as number) > 0;
     const hasManualCustomer = !!customer_name;
 
     if (!hasCustomerId && !hasManualCustomer) {
@@ -161,9 +181,12 @@ export async function POST(req: Request) {
     const invoice_type = normalizeInvoiceType(body.invoice_type);
     const status = normalizeStatus(body.status);
 
-    const notes = typeof body.notes === "string" ? body.notes.trim() || null : null;
+    const notes =
+      typeof body.notes === "string" ? body.notes.trim() || null : null;
     const site_address =
-      typeof body.site_address === "string" ? body.site_address.trim() || null : null;
+      typeof body.site_address === "string"
+        ? body.site_address.trim() || null
+        : null;
 
     const vat_rate = 0.15;
 
@@ -178,10 +201,13 @@ export async function POST(req: Request) {
           description,
           qty: rawQty === "" ? 1 : qtyForCalc(r.qty),
           unit_price_excl_vat: n2(r.price),
-          hasAnyValue: description.length > 0 || rawQty !== "" || rawPrice !== "",
+          hasAnyValue:
+            description.length > 0 || rawQty !== "" || rawPrice !== "",
         };
       })
-      .filter((r: any) => r.hasAnyValue && r.description.length > 0 && r.qty > 0);
+      .filter(
+        (r: any) => r.hasAnyValue && r.description.length > 0 && r.qty > 0
+      );
 
     if (cleanRows.length === 0) {
       return jsonError(400, {
@@ -294,9 +320,46 @@ export async function POST(req: Request) {
         });
       }
     } else {
-      const invoice_no =
-        requestedInvoiceNo ||
-        (await getNextFreeInvoiceNo(admin, invoice_type, requestedInvoiceNo));
+      const { data: existingInvoice, error: existingErr } = await admin
+        .from("invoices")
+        .select(`
+          id,
+          invoice_no,
+          invoice_type,
+          status,
+          created_by
+        `)
+        .eq("id", invoiceId)
+        .eq("created_by", userRes.user.id)
+        .maybeSingle();
+
+      if (existingErr) {
+        return jsonError(500, {
+          error: "Failed to load existing invoice",
+          supabaseError: safeError(existingErr),
+        });
+      }
+
+      if (!existingInvoice) {
+        return jsonError(404, {
+          error: "Invoice not found",
+        });
+      }
+
+      const existingStatus = String(existingInvoice.status ?? "").toUpperCase();
+      if (existingStatus !== "DRAFT") {
+        return jsonError(403, {
+          error: "Only draft invoices can be edited",
+        });
+      }
+
+      const invoice_no = requestedInvoiceNo || String(existingInvoice.invoice_no ?? "").trim();
+
+      if (!invoice_no) {
+        return jsonError(400, {
+          error: "Invoice number is required for draft update",
+        });
+      }
 
       const invoicePayload = {
         invoice_no,
@@ -308,7 +371,7 @@ export async function POST(req: Request) {
         invoice_type,
         invoice_date,
         site_address,
-        status: finalStatus,
+        status: "DRAFT",
         notes,
         subtotal: computedSubtotal,
         vat_amount: computedVat,
@@ -345,8 +408,16 @@ export async function POST(req: Request) {
         .single();
 
       if (error) {
-        return jsonError(500, {
-          error: error?.message ?? "Failed to update invoice",
+        const msg = String(error?.message ?? "").toLowerCase();
+        const isDuplicate =
+          msg.includes("duplicate key value") ||
+          msg.includes("invoices_invoice_no_key") ||
+          error?.code === "23505";
+
+        return jsonError(isDuplicate ? 409 : 500, {
+          error: isDuplicate
+            ? "Invoice number already exists"
+            : error?.message ?? "Failed to update invoice",
           supabaseError: safeError(error),
         });
       }
@@ -356,7 +427,10 @@ export async function POST(req: Request) {
 
     const savedId = String(savedInvoice.id);
 
-    const { error: delErr } = await admin.from("invoice_items").delete().eq("invoice_id", savedId);
+    const { error: delErr } = await admin
+      .from("invoice_items")
+      .delete()
+      .eq("invoice_id", savedId);
 
     if (delErr) {
       return jsonError(500, {
@@ -385,7 +459,9 @@ export async function POST(req: Request) {
     const { data: itemsData, error: itemsErr } = await admin
       .from("invoice_items")
       .insert(insertRows)
-      .select("id, invoice_id, description, qty, unit_price_excl_vat, vat_rate, vat_amount, line_total")
+      .select(
+        "id, invoice_id, description, qty, unit_price_excl_vat, vat_rate, vat_amount, line_total"
+      )
       .order("id", { ascending: true });
 
     if (itemsErr) {
@@ -415,7 +491,10 @@ export async function GET(req: Request) {
     const { data: userRes, error: uErr } = await supabase.auth.getUser();
 
     if (uErr || !userRes.user) {
-      return jsonError(401, { error: "Unauthorized", supabaseError: safeError(uErr) });
+      return jsonError(401, {
+        error: "Unauthorized",
+        supabaseError: safeError(uErr),
+      });
     }
 
     const admin = createSupabaseAdminClient();
@@ -489,12 +568,17 @@ export async function GET(req: Request) {
       }
 
       customerMap = new Map(
-        (customers ?? []).map((c: any) => [Number(c.id), { id: Number(c.id), name: c.name ?? null }])
+        (customers ?? []).map((c: any) => [
+          Number(c.id),
+          { id: Number(c.id), name: c.name ?? null },
+        ])
       );
     }
 
     const allRows = invoices.map((r: any) => {
-      const linkedCustomer = r.customer_id ? customerMap.get(Number(r.customer_id)) : null;
+      const linkedCustomer = r.customer_id
+        ? customerMap.get(Number(r.customer_id))
+        : null;
       const resolvedName = linkedCustomer?.name ?? r.customer_name ?? null;
 
       return {
@@ -555,8 +639,14 @@ export async function GET(req: Request) {
     }
 
     const totalInvoices = filtered.length;
-    const totalValue = filtered.reduce((s: number, r: any) => s + n2(r.total_amount), 0);
-    const totalOutstanding = filtered.reduce((s: number, r: any) => s + n2(r.balance_amount), 0);
+    const totalValue = filtered.reduce(
+      (s: number, r: any) => s + n2(r.total_amount),
+      0
+    );
+    const totalOutstanding = filtered.reduce(
+      (s: number, r: any) => s + n2(r.balance_amount),
+      0
+    );
 
     const today = new Date();
     const overdueCount = filtered.filter((r: any) => {
@@ -567,7 +657,10 @@ export async function GET(req: Request) {
       const d = new Date(r.invoice_date);
       if (Number.isNaN(d.getTime())) return false;
 
-      return d < today && !["PAID", "VOID"].includes(String(r.status ?? "").toUpperCase());
+      return (
+        d < today &&
+        !["PAID", "VOID"].includes(String(r.status ?? "").toUpperCase())
+      );
     }).length;
 
     const total = filtered.length;

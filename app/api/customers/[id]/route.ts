@@ -1,10 +1,14 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import {
   createSupabaseServerClient,
   createSupabaseAdminClient,
 } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
+
+type Ctx = {
+  params: Promise<{ id: string }>;
+};
 
 function jsonError(status: number, payload: any) {
   return NextResponse.json({ ok: false, ...payload }, { status });
@@ -19,18 +23,21 @@ function safeError(err: any) {
   };
 }
 
-function parsePositiveInt(value: string | null, fallback: number) {
-  const n = Number(value ?? fallback);
-  if (!Number.isFinite(n) || n <= 0) return fallback;
+function parseCustomerId(value: string) {
+  const n = Number(String(value ?? "").trim());
+  if (!Number.isFinite(n) || n <= 0) return null;
   return Math.floor(n);
 }
 
-function sanitizeSearch(value: string) {
-  return value.replace(/[,%]/g, " ").trim();
-}
-
-export async function GET(req: Request) {
+export async function GET(_req: NextRequest, ctx: Ctx) {
   try {
+    const { id } = await ctx.params;
+    const customerId = parseCustomerId(id);
+
+    if (!customerId) {
+      return jsonError(400, { error: "Invalid customer id" });
+    }
+
     const supabase = await createSupabaseServerClient();
     const { data: userRes, error: uErr } = await supabase.auth.getUser();
 
@@ -41,54 +48,30 @@ export async function GET(req: Request) {
       });
     }
 
-    const url = new URL(req.url);
-    const q = sanitizeSearch((url.searchParams.get("q") ?? "").trim());
-    const page = parsePositiveInt(url.searchParams.get("page"), 1);
-    const pageSize = Math.min(
-      200,
-      Math.max(10, parsePositiveInt(url.searchParams.get("pageSize"), 25))
-    );
+    const admin = createSupabaseAdminClient();
 
-    const from = (page - 1) * pageSize;
-    const to = from + pageSize - 1;
-
-    const supabaseAdmin = createSupabaseAdminClient();
-
-    let query = supabaseAdmin
-      .from("sub_contractors")
+    const { data, error } = await admin
+      .from("customers")
       .select(
-        "id,name,brn,vat_no,email,phone,address,contact_person,notes,is_active,created_at,updated_at",
-        { count: "exact" }
+        "id,name,brn,vat_no,email,phone,address,contact_person,notes,is_active,created_at"
       )
-      .eq("is_active", true)
-      .order("name", { ascending: true });
-
-    if (q) {
-      query = query.or(
-        `name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%,vat_no.ilike.%${q}%,brn.ilike.%${q}%,address.ilike.%${q}%,contact_person.ilike.%${q}%`
-      );
-    }
-
-    const { data, error, count } = await query.range(from, to);
+      .eq("id", customerId)
+      .maybeSingle();
 
     if (error) {
       return jsonError(500, {
-        error: "Failed to load sub contractors",
+        error: "Failed to load customer",
         supabaseError: safeError(error),
       });
     }
 
-    const total = count ?? data?.length ?? 0;
+    if (!data) {
+      return jsonError(404, { error: "Customer not found" });
+    }
 
     return NextResponse.json({
       ok: true,
-      data: data ?? [],
-      meta: {
-        page,
-        pageSize,
-        total,
-        hasMore: from + (data?.length ?? 0) < total,
-      },
+      data,
     });
   } catch (e: any) {
     return jsonError(500, {
@@ -98,8 +81,15 @@ export async function GET(req: Request) {
   }
 }
 
-export async function POST(req: Request) {
+export async function PATCH(req: NextRequest, ctx: Ctx) {
   try {
+    const { id } = await ctx.params;
+    const customerId = parseCustomerId(id);
+
+    if (!customerId) {
+      return jsonError(400, { error: "Invalid customer id" });
+    }
+
     const supabase = await createSupabaseServerClient();
     const { data: userRes, error: uErr } = await supabase.auth.getUser();
 
@@ -110,7 +100,7 @@ export async function POST(req: Request) {
       });
     }
 
-    const supabaseAdmin = createSupabaseAdminClient();
+    const admin = createSupabaseAdminClient();
     const body = await req.json().catch(() => ({}));
 
     const name = String(body.name ?? "").trim();
@@ -129,25 +119,30 @@ export async function POST(req: Request) {
         ? String(body.contact_person).trim()
         : null,
       notes: body.notes ? String(body.notes).trim() : null,
-      is_active: typeof body.is_active === "boolean" ? body.is_active : true,
+      is_active:
+        typeof body.is_active === "boolean" ? body.is_active : true,
     };
 
-    const { data, error } = await supabaseAdmin
-      .from("sub_contractors")
-      .insert(payload)
+    const { data, error } = await admin
+      .from("customers")
+      .update(payload)
+      .eq("id", customerId)
       .select(
-        "id,name,brn,vat_no,email,phone,address,contact_person,notes,is_active,created_at,updated_at"
+        "id,name,brn,vat_no,email,phone,address,contact_person,notes,is_active,created_at"
       )
       .single();
 
     if (error) {
       return jsonError(500, {
-        error: "Failed to create sub contractor",
+        error: "Failed to update customer",
         supabaseError: safeError(error),
       });
     }
 
-    return NextResponse.json({ ok: true, data }, { status: 201 });
+    return NextResponse.json({
+      ok: true,
+      data,
+    });
   } catch (e: any) {
     return jsonError(500, {
       error: "Internal error",

@@ -27,6 +27,10 @@ function isUuid(v: string) {
   );
 }
 
+function isDraftStatus(v: any) {
+  return String(v ?? "").trim().toUpperCase() === "DRAFT";
+}
+
 export async function GET(_req: Request, ctx: RouteContext) {
   const { id } = await ctx.params;
   const safeId = String(id ?? "").trim();
@@ -120,6 +124,10 @@ export async function GET(_req: Request, ctx: RouteContext) {
       });
     }
 
+    const statusKey = String(invoice.status ?? "").toUpperCase();
+    const canEditDraft = isDraftStatus(statusKey);
+    const canIssue = isDraftStatus(statusKey);
+
     return NextResponse.json(
       {
         ok: true,
@@ -143,9 +151,13 @@ export async function GET(_req: Request, ctx: RouteContext) {
             created_by: invoice.created_by,
 
             customer_name: (invoice as any).customer_name ?? customer?.name ?? null,
-            customer_address: (invoice as any).customer_address ?? customer?.address ?? null,
+            customer_address:
+              (invoice as any).customer_address ?? customer?.address ?? null,
             customer_brn: (invoice as any).customer_brn ?? customer?.brn ?? null,
             customer_vat: (invoice as any).customer_vat ?? customer?.vat_no ?? null,
+
+            can_edit_draft: canEditDraft,
+            can_issue: canIssue,
 
             customers: customer,
           },
