@@ -28,16 +28,10 @@ function n2(v: any) {
   return Number.isFinite(x) ? x : 0;
 }
 
-function normalizeInvoiceType(v: any) {
-  const s = String(v ?? "").trim().toUpperCase();
-  if (s === "PRO_FORMA" || s === "PROFORMA") return "PRO_FORMA";
-  if (s === "VAT_INVOICE" || s === "VAT") return "VAT_INVOICE";
-  if (s === "STANDARD") return "STANDARD";
-  return "VAT_INVOICE";
-}
-
 function isUuid(v: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    v
+  );
 }
 
 function pad4(n: number) {
@@ -49,8 +43,8 @@ function parseTrailingNumber(value: string) {
   return m ? Number(m[1]) : NaN;
 }
 
-async function generateNextInvoiceNo(admin: any, invoiceType: string) {
-  const prefix = invoiceType === "PRO_FORMA" ? "PFI" : "INV";
+async function generateNextInvoiceNo(admin: any) {
+  const prefix = "PFI";
 
   const { data, error } = await admin
     .from("invoices")
@@ -64,10 +58,7 @@ async function generateNextInvoiceNo(admin: any, invoiceType: string) {
 
   const filtered = (data ?? []).filter((r: any) => {
     const t = String(r.invoice_type ?? "").toUpperCase();
-    if (invoiceType === "PRO_FORMA") {
-      return t === "PRO_FORMA" || t === "PROFORMA";
-    }
-    return t === "VAT_INVOICE" || t === "VAT" || t === "STANDARD";
+    return t === "PRO_FORMA" || t === "PROFORMA";
   });
 
   let maxNo = 0;
@@ -105,7 +96,7 @@ export async function POST(req: Request, ctx: RouteContext) {
     const admin = createSupabaseAdminClient();
     const body = await req.json().catch(() => ({}));
 
-    const invoiceType = normalizeInvoiceType(body.invoice_type ?? "VAT_INVOICE");
+    const invoiceType = "PRO_FORMA";
 
     const requestedInvoiceNo =
       typeof body.invoice_no === "string" ? body.invoice_no.trim() : "";
@@ -170,7 +161,7 @@ export async function POST(req: Request, ctx: RouteContext) {
 
     if (String(quote.status ?? "").toUpperCase() !== "ACCEPTED") {
       return jsonError(400, {
-        error: "Only accepted quotations can be converted to invoice",
+        error: "Only accepted quotations can be converted to Pro Forma invoice",
       });
     }
 
@@ -216,7 +207,7 @@ export async function POST(req: Request, ctx: RouteContext) {
 
     let invoiceNo = requestedInvoiceNo;
     if (!invoiceNo) {
-      invoiceNo = await generateNextInvoiceNo(admin, invoiceType);
+      invoiceNo = await generateNextInvoiceNo(admin);
     }
 
     const invoicePayload: Record<string, any> = {
@@ -236,7 +227,7 @@ export async function POST(req: Request, ctx: RouteContext) {
       vat_amount: n2(quote.vat_amount),
       total_amount: n2(quote.total_amount),
       paid_amount: 0,
-      balance_amount: n2(quote.total_amount),
+      balance_amount: 0,
       created_by: userRes.user.id,
     };
 
@@ -269,7 +260,7 @@ export async function POST(req: Request, ctx: RouteContext) {
 
     if (invErr) {
       return jsonError(500, {
-        error: "Failed to create invoice from quotation",
+        error: "Failed to create Pro Forma invoice from quotation",
         supabaseError: safeError(invErr),
       });
     }
@@ -292,7 +283,7 @@ export async function POST(req: Request, ctx: RouteContext) {
       await admin.from("invoices").delete().eq("id", invoice.id);
 
       return jsonError(500, {
-        error: "Invoice created but failed to insert invoice items",
+        error: "Pro Forma invoice created but failed to insert invoice items",
         invoice_id: invoice.id,
         supabaseError: safeError(invItemsErr),
       });
@@ -309,7 +300,7 @@ export async function POST(req: Request, ctx: RouteContext) {
 
     if (updQuoteErr) {
       return jsonError(500, {
-        error: "Invoice created but failed to update quotation conversion status",
+        error: "Pro Forma invoice created but failed to update quotation conversion status",
         invoice_id: invoice.id,
         supabaseError: safeError(updQuoteErr),
       });

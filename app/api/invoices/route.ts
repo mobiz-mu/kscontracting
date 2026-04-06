@@ -1,4 +1,3 @@
-
 import { NextResponse } from "next/server";
 import {
   createSupabaseServerClient,
@@ -83,9 +82,19 @@ async function getNextFreeInvoiceNo(
     );
   }
 
-  const filtered = (existingRows ?? []).filter((x: any) =>
-    isProForma ? x.invoice_type === "PRO_FORMA" : x.invoice_type === "VAT_INVOICE"
-  );
+  const filtered = (existingRows ?? []).filter((x: any) => {
+    const type = String(x.invoice_type ?? "").toUpperCase();
+
+    if (isProForma) {
+      return type === "PRO_FORMA" || type === "PROFORMA";
+    }
+
+    return (
+      type === "VAT_INVOICE" ||
+      type === "VAT" ||
+      type === "STANDARD"
+    );
+  });
 
   const nums = filtered
     .map((x: any) => parseInvNo(String(x.invoice_no ?? "")))
@@ -109,7 +118,7 @@ async function bumpCompanySettingsCounter(
   const parsed = parseInvNo(invoiceNo);
   if (!Number.isFinite(parsed)) return;
 
-  if (invoiceType === "VAT_INVOICE") {
+  if (invoiceType === "VAT_INVOICE" || invoiceType === "STANDARD") {
     await admin
       .from("company_settings")
       .update({ next_invoice_no: parsed + 1 })
@@ -183,9 +192,15 @@ export async function POST(req: Request) {
 
     const notes =
       typeof body.notes === "string" ? body.notes.trim() || null : null;
+
     const site_address =
       typeof body.site_address === "string"
         ? body.site_address.trim() || null
+        : null;
+
+    const due_date =
+      typeof body.due_date === "string"
+        ? body.due_date.trim() || null
         : null;
 
     const vat_rate = 0.15;
@@ -222,14 +237,29 @@ export async function POST(req: Request) {
     const computedVat = computedSubtotal * vat_rate;
     const computedTotal = computedSubtotal + computedVat;
 
-    const paid_amount = n2(body.paid_amount ?? 0);
-    const balance_amount = Math.max(0, computedTotal - paid_amount);
+    const isProForma = invoice_type === "PRO_FORMA";
+
+    const paid_amount = isProForma ? 0 : n2(body.paid_amount ?? 0);
+    const balance_amount = isProForma
+      ? 0
+      : Math.max(0, computedTotal - paid_amount);
 
     let finalStatus = status;
-    if (balance_amount <= 0 && computedTotal > 0) {
-      finalStatus = "PAID";
-    } else if (paid_amount > 0 && balance_amount > 0) {
-      finalStatus = "PARTIALLY_PAID";
+
+    if (isProForma) {
+      if (status === "VOID") {
+        finalStatus = "VOID";
+      } else {
+        finalStatus = "ISSUED";
+      }
+    } else {
+      if (status === "VOID") {
+        finalStatus = "VOID";
+      } else if (balance_amount <= 0 && computedTotal > 0) {
+        finalStatus = "PAID";
+      } else if (paid_amount > 0 && balance_amount > 0) {
+        finalStatus = "PARTIALLY_PAID";
+      }
     }
 
     let savedInvoice: any = null;
@@ -247,6 +277,7 @@ export async function POST(req: Request) {
         customer_address,
         invoice_type,
         invoice_date,
+        due_date,
         site_address,
         status: finalStatus,
         notes,
@@ -277,6 +308,7 @@ export async function POST(req: Request) {
             customer_address,
             invoice_type,
             invoice_date,
+            due_date,
             site_address,
             status,
             notes,
@@ -353,7 +385,8 @@ export async function POST(req: Request) {
         });
       }
 
-      const invoice_no = requestedInvoiceNo || String(existingInvoice.invoice_no ?? "").trim();
+      const invoice_no =
+        requestedInvoiceNo || String(existingInvoice.invoice_no ?? "").trim();
 
       if (!invoice_no) {
         return jsonError(400, {
@@ -370,6 +403,7 @@ export async function POST(req: Request) {
         customer_address,
         invoice_type,
         invoice_date,
+        due_date,
         site_address,
         status: "DRAFT",
         notes,
@@ -395,6 +429,7 @@ export async function POST(req: Request) {
           customer_address,
           invoice_type,
           invoice_date,
+          due_date,
           site_address,
           status,
           notes,
@@ -521,6 +556,7 @@ export async function GET(req: Request) {
         customer_address,
         invoice_type,
         invoice_date,
+        due_date,
         site_address,
         status,
         notes,
@@ -591,6 +627,7 @@ export async function GET(req: Request) {
         customer_address: r.customer_address ?? null,
         invoice_type: r.invoice_type ?? "STANDARD",
         invoice_date: r.invoice_date ?? null,
+        due_date: r.due_date ?? null,
         site_address: r.site_address ?? null,
         status: r.status,
         notes: r.notes ?? null,
@@ -611,6 +648,7 @@ export async function GET(req: Request) {
         const invoiceNo = String(r.invoice_no ?? "").toLowerCase();
         const customerName = String(r.customer_name ?? "").toLowerCase();
         const siteAddress = String(r.site_address ?? "").toLowerCase();
+
         return (
           invoiceNo.includes(needle) ||
           customerName.includes(needle) ||
@@ -643,24 +681,38 @@ export async function GET(req: Request) {
       (s: number, r: any) => s + n2(r.total_amount),
       0
     );
-    const totalOutstanding = filtered.reduce(
+
+    const receivableVatInvoices = filtered.filter((r: any) => {
+      const type = String(r.invoice_type ?? "").toUpperCase();
+      const status = String(r.status ?? "").toUpperCase();
+
+      return (
+        type === "VAT_INVOICE" &&
+        !["DRAFT", "VOID"].includes(status)
+      );
+    });
+
+    const totalOutstanding = receivableVatInvoices.reduce(
       (s: number, r: any) => s + n2(r.balance_amount),
       0
     );
 
     const today = new Date();
-    const overdueCount = filtered.filter((r: any) => {
+    today.setHours(0, 0, 0, 0);
+
+    const overdueCount = receivableVatInvoices.filter((r: any) => {
       const bal = n2(r.balance_amount);
       if (bal <= 0) return false;
-      if (!r.invoice_date) return false;
 
-      const d = new Date(r.invoice_date);
+      const baseDate = r.due_date || r.invoice_date;
+      if (!baseDate) return false;
+
+      const d = new Date(baseDate);
       if (Number.isNaN(d.getTime())) return false;
 
-      return (
-        d < today &&
-        !["PAID", "VOID"].includes(String(r.status ?? "").toUpperCase())
-      );
+      d.setHours(0, 0, 0, 0);
+
+      return d.getTime() < today.getTime();
     }).length;
 
     const total = filtered.length;

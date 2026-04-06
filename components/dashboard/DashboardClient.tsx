@@ -62,6 +62,7 @@ type InvoiceRow = {
   customer_vat?: string | null;
   customer_brn?: string | null;
   customer_address?: string | null;
+  invoice_type?: string | null;
   invoice_date?: string | null;
   due_date?: string | null;
   site_address?: string | null;
@@ -220,18 +221,26 @@ function clamp(n: number, min: number, max: number) {
 }
 
 function isOverdue(inv: InvoiceRow) {
+  if (!isVatReceivableInvoice(inv)) return false;
+
   const due = safeDate(inv.due_date);
   const balance = n2(inv.balance_amount);
+
   if (!due || balance <= 0) return false;
+
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   due.setHours(0, 0, 0, 0);
+
   return due.getTime() < today.getTime();
 }
 
 function daysPastDue(inv: InvoiceRow) {
+  if (!isVatReceivableInvoice(inv)) return 0;
+
   const due = safeDate(inv.due_date);
   const balance = n2(inv.balance_amount);
+
   if (!due || balance <= 0) return 0;
 
   const today = new Date();
@@ -243,6 +252,36 @@ function daysPastDue(inv: InvoiceRow) {
 
   return Math.floor(diff / (1000 * 60 * 60 * 24));
 }
+
+function invoiceTypeKey(inv: InvoiceRow) {
+  return String(inv.invoice_type ?? "").toUpperCase();
+}
+
+function invoiceStatusKey(inv: InvoiceRow) {
+  return String(inv.status ?? "").toUpperCase();
+}
+
+function isVatReceivableInvoice(inv: InvoiceRow) {
+  return (
+    invoiceTypeKey(inv) === "VAT_INVOICE" &&
+    !["DRAFT", "VOID"].includes(invoiceStatusKey(inv))
+  );
+}
+
+function isPaidRevenueInvoice(inv: InvoiceRow) {
+  return (
+    invoiceTypeKey(inv) === "VAT_INVOICE" &&
+    invoiceStatusKey(inv) === "PAID"
+  );
+}
+
+function isCollectionInvoice(inv: InvoiceRow) {
+  return (
+    invoiceTypeKey(inv) === "VAT_INVOICE" &&
+    invoiceStatusKey(inv) !== "VOID"
+  );
+}
+
 
 async function safeGet<T>(url: string): Promise<T> {
   const res = await fetch(url, { cache: "no-store" });
@@ -440,14 +479,44 @@ export default function DashboardClient() {
         return d ? d >= previousMonthStart && d <= previousMonthEnd : false;
       });
 
-      const revenueThisMonth = thisMonthInvoices.reduce((s, x) => s + n2(x.total_amount), 0);
-      const revenuePrevMonth = prevMonthInvoices.reduce((s, x) => s + n2(x.total_amount), 0);
+      const thisMonthPaidRevenueInvoices = thisMonthInvoices.filter(isPaidRevenueInvoice);
+const prevMonthPaidRevenueInvoices = prevMonthInvoices.filter(isPaidRevenueInvoice);
 
-      const outstandingNow = invRows.reduce((s, x) => s + n2(x.balance_amount), 0);
-      const outstandingPrev = prevMonthInvoices.reduce((s, x) => s + n2(x.balance_amount), 0);
+const receivableInvoicesNow = invRows.filter(isVatReceivableInvoice);
+const receivableInvoicesPrev = prevMonthInvoices.filter(isVatReceivableInvoice);
 
-      const collectionsThisMonth = thisMonthInvoices.reduce((s, x) => s + n2(x.paid_amount), 0);
-      const collectionsPrevMonth = prevMonthInvoices.reduce((s, x) => s + n2(x.paid_amount), 0);
+const thisMonthCollectionInvoices = thisMonthInvoices.filter(isCollectionInvoice);
+const prevMonthCollectionInvoices = prevMonthInvoices.filter(isCollectionInvoice);
+
+const revenueThisMonth = thisMonthPaidRevenueInvoices.reduce(
+  (s, x) => s + n2(x.total_amount),
+  0
+);
+
+const revenuePrevMonth = prevMonthPaidRevenueInvoices.reduce(
+  (s, x) => s + n2(x.total_amount),
+  0
+);
+
+const outstandingNow = receivableInvoicesNow.reduce(
+  (s, x) => s + n2(x.balance_amount),
+  0
+);
+
+const outstandingPrev = receivableInvoicesPrev.reduce(
+  (s, x) => s + n2(x.balance_amount),
+  0
+);
+
+const collectionsThisMonth = thisMonthCollectionInvoices.reduce(
+  (s, x) => s + n2(x.paid_amount),
+  0
+);
+
+const collectionsPrevMonth = prevMonthCollectionInvoices.reduce(
+  (s, x) => s + n2(x.paid_amount),
+  0
+);
 
       const creditThisMonth = thisMonthCreditNotes.reduce((s, x) => s + n2(x.total_amount), 0);
       const creditPrevMonth = prevMonthCreditNotes.reduce((s, x) => s + n2(x.total_amount), 0);
@@ -507,17 +576,25 @@ export default function DashboardClient() {
       }
 
       for (const inv of invRows) {
-        const d = safeDate(inv.invoice_date ?? inv.created_at);
-        if (!d) continue;
+  const d = safeDate(inv.invoice_date ?? inv.created_at);
+  if (!d) continue;
 
-        const key = monthKey(startOfMonth(d));
-        const slot = seriesMap.get(key);
-        if (!slot) continue;
+  const key = monthKey(startOfMonth(d));
+  const slot = seriesMap.get(key);
+  if (!slot) continue;
 
-        slot.revenue += n2(inv.total_amount);
-        slot.collections += n2(inv.paid_amount);
-        slot.dues += n2(inv.balance_amount);
-      }
+  if (isPaidRevenueInvoice(inv)) {
+    slot.revenue += n2(inv.total_amount);
+  }
+
+  if (isCollectionInvoice(inv)) {
+    slot.collections += n2(inv.paid_amount);
+  }
+
+  if (isVatReceivableInvoice(inv)) {
+    slot.dues += n2(inv.balance_amount);
+  }
+}
 
       for (const crn of crnRows) {
         const d = safeDate(crn.credit_date ?? crn.created_at);
@@ -549,10 +626,15 @@ export default function DashboardClient() {
         })
       );
 
-      const paidCount = invRows.filter((x) => String(x.status ?? "").toUpperCase() === "PAID").length;
-      const issuedCount = invRows.filter((x) => String(x.status ?? "").toUpperCase() === "ISSUED").length;
-      const partialCount = invRows.filter((x) => String(x.status ?? "").toUpperCase() === "PARTIALLY_PAID").length;
-      const overdueCount = invRows.filter((x) => isOverdue(x)).length;
+
+      const vatStatusRows = invRows.filter(
+        (x) => invoiceTypeKey(x) === "VAT_INVOICE" && invoiceStatusKey(x) !== "VOID"
+      );
+  
+      const paidCount = vatStatusRows.filter((x) => invoiceStatusKey(x) === "PAID").length;
+      const issuedCount = vatStatusRows.filter((x) => invoiceStatusKey(x) === "ISSUED").length;
+      const partialCount = vatStatusRows.filter((x) => invoiceStatusKey(x) === "PARTIALLY_PAID").length;
+      const overdueCount = vatStatusRows.filter((x) => isOverdue(x)).length;
 
       setStatusSlices([
         { name: "Issued", value: issuedCount },
@@ -569,7 +651,7 @@ export default function DashboardClient() {
         { name: "90+", value: 0 },
       ];
 
-      for (const inv of invRows) {
+      for (const inv of receivableInvoicesNow) {
         const bal = n2(inv.balance_amount);
         if (bal <= 0) continue;
         const d = daysPastDue(inv);
@@ -596,7 +678,7 @@ export default function DashboardClient() {
         }
       >();
 
-      for (const inv of invRows) {
+      for (const inv of receivableInvoicesNow) {
         const bal = n2(inv.balance_amount);
         if (bal <= 0) continue;
 
@@ -691,33 +773,42 @@ export default function DashboardClient() {
   }, [load]);
 
   const revenueThisMonth = React.useMemo(() => {
-    return invoices
-      .filter((x) => {
-        const d = safeDate(x.invoice_date ?? x.created_at);
-        return d ? d >= currentMonthStart : false;
-      })
-      .reduce((s, x) => s + n2(x.total_amount), 0);
-  }, [invoices, currentMonthStart]);
+  return invoices
+    .filter((x) => {
+      const d = safeDate(x.invoice_date ?? x.created_at);
+      return d ? d >= currentMonthStart : false;
+    })
+    .filter(isPaidRevenueInvoice)
+    .reduce((s, x) => s + n2(x.total_amount), 0);
+}, [invoices, currentMonthStart]);
+
+const collections = React.useMemo(
+  () =>
+    invoices
+      .filter(isCollectionInvoice)
+      .reduce((s, x) => s + n2(x.paid_amount), 0),
+  [invoices]
+);
+
+const outstanding = React.useMemo(
+  () =>
+    invoices
+      .filter(isVatReceivableInvoice)
+      .reduce((s, x) => s + n2(x.balance_amount), 0),
+  [invoices]
+);
 
   const quotationPipeline = React.useMemo(
     () => quotations.reduce((s, x) => s + n2(x.total_amount), 0),
     [quotations]
   );
 
-  const collections = React.useMemo(
-    () => invoices.reduce((s, x) => s + n2(x.paid_amount), 0),
-    [invoices]
-  );
 
   const creditNoteValue = React.useMemo(
     () => creditNotes.reduce((s, x) => s + n2(x.total_amount), 0),
     [creditNotes]
   );
 
-  const outstanding = React.useMemo(
-    () => invoices.reduce((s, x) => s + n2(x.balance_amount), 0),
-    [invoices]
-  );
 
   const totalAging = React.useMemo(() => aging.reduce((s, x) => s + x.value, 0), [aging]);
 
