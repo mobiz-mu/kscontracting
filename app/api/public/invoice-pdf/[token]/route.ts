@@ -1,6 +1,4 @@
 import { NextResponse } from "next/server";
-import chromium from "@sparticuz/chromium-min";
-import { chromium as playwright } from "playwright-core";
 
 export const runtime = "nodejs";
 
@@ -22,6 +20,17 @@ export async function GET(req: Request, ctx: RouteContext) {
 
   const reqUrl = new URL(req.url);
   const appUrl = reqUrl.origin;
+
+  // Imported lazily (not at module scope) on purpose: these packages pull in
+  // native/binary-dependent code. Loading them eagerly means Next's build-time
+  // "Collecting page data" step has to import them just to inspect this
+  // route's exports, which is unnecessary work (and a plausible source of
+  // build-time flakiness/OOM under many parallel workers) for a route that
+  // only actually needs them once, at request time.
+  const [{ default: chromium }, { chromium: playwright }] = await Promise.all([
+    import("@sparticuz/chromium-min"),
+    import("playwright-core"),
+  ]);
 
   let browser: Awaited<ReturnType<typeof playwright.launch>> | null = null;
 
@@ -64,7 +73,7 @@ export async function GET(req: Request, ctx: RouteContext) {
 
     await page.evaluate(async () => {
       const fontsReady =
-        "fonts" in document ? (document as any).fonts.ready : Promise.resolve();
+        "fonts" in document ? document.fonts.ready : Promise.resolve();
 
       const images = Array.from(document.images || []);
       const imagePromises = images.map((img) => {
@@ -101,13 +110,10 @@ export async function GET(req: Request, ctx: RouteContext) {
         "Cache-Control": "private, no-store, no-cache, must-revalidate",
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    console.error("[public/invoice-pdf]", error);
     return NextResponse.json(
-      {
-        ok: false,
-        error: "Failed to generate public invoice PDF",
-        details: error?.message ?? String(error),
-      },
+      { ok: false, error: "Failed to generate public invoice PDF" },
       { status: 500 }
     );
   } finally {

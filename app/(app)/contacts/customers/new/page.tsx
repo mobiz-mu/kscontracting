@@ -7,6 +7,7 @@ import { ArrowLeft, Save } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { getErrorMessage } from "@/lib/utils";
 
 export default function NewCustomerPage() {
   const router = useRouter();
@@ -51,8 +52,8 @@ export default function NewCustomerPage() {
       }
 
       router.push(`/contacts/customers/${json.data.id}`);
-    } catch (e: any) {
-      alert(e.message || "Failed to create customer");
+    } catch (e: unknown) {
+      alert(getErrorMessage(e, "Failed to create customer"));
     } finally {
       setLoading(false);
     }

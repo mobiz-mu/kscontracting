@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
+import { requirePermission } from "@/lib/authz";
 import {
-  createSupabaseServerClient,
   createSupabaseAdminClient,
 } from "@/lib/supabase/server";
 
@@ -10,20 +10,11 @@ type RouteContext = {
   params: Promise<{ id: string }>;
 };
 
-function jsonError(status: number, payload: any) {
+function jsonError(status: number, payload: Record<string, unknown>) {
   return NextResponse.json({ ok: false, ...payload }, { status });
 }
 
-function safeError(err: any) {
-  return {
-    message: err?.message ?? "Unknown error",
-    code: err?.code ?? null,
-    details: err?.details ?? null,
-    hint: err?.hint ?? null,
-  };
-}
-
-function n2(v: any) {
+function n2(v: unknown) {
   const x = Number(v ?? 0);
   return Number.isFinite(x) ? x : 0;
 }
@@ -43,7 +34,7 @@ function parseTrailingNumber(value: string) {
   return m ? Number(m[1]) : NaN;
 }
 
-async function generateNextInvoiceNo(admin: any) {
+async function generateNextInvoiceNo(admin: ReturnType<typeof createSupabaseAdminClient>) {
   const prefix = "PFI";
 
   const { data, error } = await admin
@@ -56,7 +47,7 @@ async function generateNextInvoiceNo(admin: any) {
     throw new Error(error.message || "Failed to generate invoice number");
   }
 
-  const filtered = (data ?? []).filter((r: any) => {
+  const filtered = (data ?? []).filter((r: { invoice_type?: string | null }) => {
     const t = String(r.invoice_type ?? "").toUpperCase();
     return t === "PRO_FORMA" || t === "PROFORMA";
   });
@@ -83,15 +74,7 @@ export async function POST(req: Request, ctx: RouteContext) {
       return jsonError(400, { error: "Invalid quotation id" });
     }
 
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: userErr } = await supabase.auth.getUser();
-
-    if (userErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(userErr),
-      });
-    }
+    const authz = await requirePermission("quotations.convert");
 
     const admin = createSupabaseAdminClient();
     const body = await req.json().catch(() => ({}));
@@ -134,18 +117,12 @@ export async function POST(req: Request, ctx: RouteContext) {
       .maybeSingle();
 
     if (quoteErr) {
-      return jsonError(500, {
-        error: "Failed to load quotation",
-        supabaseError: safeError(quoteErr),
-      });
+      console.error("[quotations/[id]/convert]", quoteErr);
+      return jsonError(500, { error: "Failed to load quotation" });
     }
 
     if (!quote) {
       return jsonError(404, { error: "Quotation not found" });
-    }
-
-    if (String(quote.created_by) !== String(userRes.user.id)) {
-      return jsonError(403, { error: "Forbidden" });
     }
 
     if (quote.converted_invoice_id) {
@@ -186,10 +163,8 @@ export async function POST(req: Request, ctx: RouteContext) {
       .order("id", { ascending: true });
 
     if (itemsErr) {
-      return jsonError(500, {
-        error: "Failed to load quotation items",
-        supabaseError: safeError(itemsErr),
-      });
+      console.error("[quotations/[id]/convert]", itemsErr);
+      return jsonError(500, { error: "Failed to load quotation items" });
     }
 
     const items = qItems ?? [];
@@ -210,7 +185,7 @@ export async function POST(req: Request, ctx: RouteContext) {
       invoiceNo = await generateNextInvoiceNo(admin);
     }
 
-    const invoicePayload: Record<string, any> = {
+    const invoicePayload: Record<string, unknown> = {
       invoice_no: invoiceNo,
       customer_id: Number(quote.customer_id),
       customer_name: quote.customer_name ?? null,
@@ -228,7 +203,7 @@ export async function POST(req: Request, ctx: RouteContext) {
       total_amount: n2(quote.total_amount),
       paid_amount: 0,
       balance_amount: 0,
-      created_by: userRes.user.id,
+      created_by: authz.userId,
     };
 
     const { data: invoice, error: invErr } = await admin
@@ -259,13 +234,11 @@ export async function POST(req: Request, ctx: RouteContext) {
       .single();
 
     if (invErr) {
-      return jsonError(500, {
-        error: "Failed to create Pro Forma invoice from quotation",
-        supabaseError: safeError(invErr),
-      });
+      console.error("[quotations/[id]/convert]", invErr);
+      return jsonError(500, { error: "Failed to create Pro Forma invoice from quotation" });
     }
 
-    const invoiceItemsPayload = items.map((item: any) => ({
+    const invoiceItemsPayload = items.map((item) => ({
       invoice_id: invoice.id,
       description: String(item.description ?? "").trim(),
       qty: n2(item.qty),
@@ -282,10 +255,10 @@ export async function POST(req: Request, ctx: RouteContext) {
     if (invItemsErr) {
       await admin.from("invoices").delete().eq("id", invoice.id);
 
+      console.error("[quotations/convert]", invItemsErr);
       return jsonError(500, {
         error: "Pro Forma invoice created but failed to insert invoice items",
         invoice_id: invoice.id,
-        supabaseError: safeError(invItemsErr),
       });
     }
 
@@ -295,14 +268,13 @@ export async function POST(req: Request, ctx: RouteContext) {
         status: "ACCEPTED",
         converted_invoice_id: invoice.id,
       })
-      .eq("id", quotationId)
-      .eq("created_by", userRes.user.id);
+      .eq("id", quotationId);
 
     if (updQuoteErr) {
+      console.error("[quotations/convert]", updQuoteErr);
       return jsonError(500, {
         error: "Pro Forma invoice created but failed to update quotation conversion status",
         invoice_id: invoice.id,
-        supabaseError: safeError(updQuoteErr),
       });
     }
 
@@ -315,8 +287,11 @@ export async function POST(req: Request, ctx: RouteContext) {
         invoice,
       },
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
     console.error("[POST /api/quotations/[id]/convert] fatal", e);
-    return jsonError(500, { error: e?.message ?? "Internal error" });
+    return jsonError(500, { error: "Internal error" });
   }
 }

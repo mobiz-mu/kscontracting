@@ -18,7 +18,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 
 type QuoteRow = {
   id: string;
@@ -57,15 +57,15 @@ type QuotationsResponse = {
     voidCount: number;
     byStatus?: Record<string, number>;
   };
-  error?: any;
+  error?: string;
 };
 
-function n2(v: any) {
+function n2(v: unknown) {
   const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
 }
 
-function money(v: any) {
+function money(v: unknown) {
   const n = n2(v);
   return `Rs ${n.toLocaleString("en-MU", {
     minimumFractionDigits: 2,
@@ -223,13 +223,13 @@ export default function ConvertQuoteToInvoicePage() {
       const json: QuotationsResponse = await res.json();
 
       if (!res.ok || !json?.ok) {
-        throw new Error((json as any)?.error ?? "Failed to load quotations");
+        throw new Error((json as { error?: string } | null)?.error ?? "Failed to load quotations");
       }
 
       setRows(json.data ?? []);
       setKpi(json.kpi ?? null);
-    } catch (e: any) {
-      setError(e?.message || "Failed to load quotations");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to load quotations"));
       setRows([]);
       setKpi(null);
     } finally {
@@ -239,6 +239,7 @@ export default function ConvertQuoteToInvoicePage() {
 
   React.useEffect(() => {
     void load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: load on mount/param change only
   }, []);
 
   return (

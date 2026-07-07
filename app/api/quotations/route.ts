@@ -1,38 +1,22 @@
 import { NextResponse } from "next/server";
+import { requirePermission } from "@/lib/authz";
 import {
-  createSupabaseServerClient,
   createSupabaseAdminClient,
 } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
-function jsonError(status: number, payload: any) {
+function jsonError(status: number, payload: Record<string, unknown>) {
   return NextResponse.json({ ok: false, ...payload }, { status });
 }
 
-function safeError(err: any) {
-  return {
-    message: err?.message ?? "Unknown error",
-    code: err?.code ?? null,
-    details: err?.details ?? null,
-    hint: err?.hint ?? null,
-  };
-}
-
-function n2(v: any) {
+function n2(v: unknown) {
   const x = Number(v ?? 0);
   return Number.isFinite(x) ? x : 0;
 }
 
 function round2(n: number) {
   return Math.round((n + Number.EPSILON) * 100) / 100;
-}
-
-function normalizeStatus(v: any) {
-  const s = String(v ?? "").trim().toUpperCase();
-  if (s === "ACCEPTED") return "ACCEPTED";
-  if (s === "VOID") return "VOID";
-  return "DRAFT";
 }
 
 function pad4(n: number) {
@@ -43,15 +27,7 @@ export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
 
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: userErr } = await supabase.auth.getUser();
-
-    if (userErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(userErr),
-      });
-    }
+    const authz = await requirePermission("quotations.create");
 
     const admin = createSupabaseAdminClient();
 
@@ -114,10 +90,11 @@ export async function POST(req: Request) {
 
     const vatRate = 0.15;
 
-    const items = Array.isArray(body.items) ? body.items : [];
+    type RawQuoteItemInput = { description?: unknown; qty?: unknown; price?: unknown };
+    const items: RawQuoteItemInput[] = Array.isArray(body.items) ? body.items : [];
 
     const cleanItems = items
-      .map((it: any) => {
+      .map((it) => {
         const description = String(it.description ?? "").trim();
         const rawQty = String(it.qty ?? "").trim();
         const rawPrice = String(it.price ?? "").trim();
@@ -131,7 +108,7 @@ export async function POST(req: Request) {
         };
       })
       .filter(
-        (it: any) =>
+        (it) =>
           it.hasAnyValue && it.description.length > 0 && it.qty > 0
       );
 
@@ -143,8 +120,7 @@ export async function POST(req: Request) {
 
     const subtotal = round2(
       cleanItems.reduce(
-        (sum: number, it: any) =>
-          sum + n2(it.qty) * n2(it.unit_price_excl_vat),
+        (sum, it) => sum + n2(it.qty) * n2(it.unit_price_excl_vat),
         0
       )
     );
@@ -157,7 +133,7 @@ export async function POST(req: Request) {
     let resolvedQuotationNo =
       typeof body.quotation_no === "string" ? body.quotation_no.trim() : "";
 
-    let savedQuote: any = null;
+    let savedQuote: Record<string, unknown> | null = null;
 
     if (!quotationId) {
       const { data: settings, error: settingsErr } = await admin
@@ -167,10 +143,8 @@ export async function POST(req: Request) {
         .single();
 
       if (settingsErr || !settings) {
-        return jsonError(500, {
-          error: "Failed to load company settings for quotation number",
-          supabaseError: safeError(settingsErr),
-        });
+        console.error("[quotations]", settingsErr);
+      return jsonError(500, { error: "Failed to load company settings for quotation number" });
       }
 
       const prefix = String(settings.quote_prefix ?? "QTN").trim() || "QTN";
@@ -197,7 +171,7 @@ export async function POST(req: Request) {
         total_amount: totalAmount,
         vat_rate: vatRate,
         status: "DRAFT",
-        created_by: userRes.user.id,
+        created_by: authz.userId,
       };
 
       const { data, error } = await admin
@@ -227,10 +201,8 @@ export async function POST(req: Request) {
         .single();
 
       if (error) {
-        return jsonError(500, {
-          error: "Failed to create quotation",
-          supabaseError: safeError(error),
-        });
+        console.error("[quotations]", error);
+      return jsonError(500, { error: "Failed to create quotation" });
       }
 
       savedQuote = data;
@@ -245,10 +217,10 @@ export async function POST(req: Request) {
         .eq("id", 1);
 
       if (settingsUpdateErr) {
+        console.error("[quotations]", settingsUpdateErr);
         return jsonError(500, {
           error: "Quotation created but failed to advance quotation counter",
           quotation_id: savedQuote.id,
-          supabaseError: safeError(settingsUpdateErr),
         });
       }
     } else {
@@ -262,14 +234,11 @@ export async function POST(req: Request) {
           created_by
         `)
         .eq("id", quotationId)
-        .eq("created_by", userRes.user.id)
         .maybeSingle();
 
       if (existingErr) {
-        return jsonError(500, {
-          error: "Failed to load existing quotation",
-          supabaseError: safeError(existingErr),
-        });
+        console.error("[quotations]", existingErr);
+      return jsonError(500, { error: "Failed to load existing quotation" });
       }
 
       if (!existingQuote) {
@@ -321,7 +290,6 @@ export async function POST(req: Request) {
         .from("quotations")
         .update(quotationPayload)
         .eq("id", quotationId)
-        .eq("created_by", userRes.user.id)
         .select(`
           id,
           quote_no,
@@ -346,10 +314,8 @@ export async function POST(req: Request) {
         .single();
 
       if (error) {
-        return jsonError(500, {
-          error: "Failed to update quotation",
-          supabaseError: safeError(error),
-        });
+        console.error("[quotations]", error);
+      return jsonError(500, { error: "Failed to update quotation" });
       }
 
       savedQuote = data;
@@ -363,14 +329,11 @@ export async function POST(req: Request) {
       .eq("quotation_id", savedId);
 
     if (delErr) {
-      return jsonError(500, {
-        error: "Quotation saved but failed to clear existing items",
-        quotation_id: savedId,
-        supabaseError: safeError(delErr),
-      });
+      console.error("[quotations]", delErr);
+      return jsonError(500, { error: "Quotation saved but failed to clear existing items", quotation_id: savedId });
     }
 
-    const itemsPayload = cleanItems.map((it: any) => {
+    const itemsPayload = cleanItems.map((it) => {
       const base = round2(n2(it.qty) * n2(it.unit_price_excl_vat));
       const vat_amount = round2(base * vatRate);
       const line_total = round2(base + vat_amount);
@@ -402,11 +365,8 @@ export async function POST(req: Request) {
       .order("id", { ascending: true });
 
     if (itemsErr) {
-      return jsonError(500, {
-        error: "Failed to insert quotation items",
-        quotation_id: savedId,
-        supabaseError: safeError(itemsErr),
-      });
+      console.error("[quotations]", itemsErr);
+      return jsonError(500, { error: "Failed to insert quotation items", quotation_id: savedId });
     }
 
     return NextResponse.json({
@@ -416,25 +376,18 @@ export async function POST(req: Request) {
         items: itemsData ?? [],
       },
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
     console.error("[POST /api/quotations] fatal", e);
-    return jsonError(500, {
-      error: e?.message ?? "Internal error",
-    });
+    return jsonError(500, { error: "Internal error" });
   }
 }
 
 export async function GET(req: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: userErr } = await supabase.auth.getUser();
-
-    if (userErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(userErr),
-      });
-    }
+    await requirePermission("quotations.view");
 
     const { searchParams } = new URL(req.url);
     const q = (searchParams.get("q") ?? "").trim();
@@ -473,21 +426,18 @@ export async function GET(req: Request) {
         created_at,
         converted_invoice_id
       `)
-      .eq("created_by", userRes.user.id)
       .order("created_at", { ascending: false });
 
     if (baseErr) {
-      return jsonError(500, {
-        error: "Failed to load quotations",
-        supabaseError: safeError(baseErr),
-      });
+      console.error("[quotations]", baseErr);
+      return jsonError(500, { error: "Failed to load quotations" });
     }
 
     let filtered = quoteBase ?? [];
 
     if (q) {
       const needle = q.toLowerCase();
-      filtered = filtered.filter((r: any) => {
+      filtered = filtered.filter((r) => {
         const quoteNo = String(r.quote_no ?? r.quotation_no ?? "").toLowerCase();
         const customerName = String(r.customer_name ?? "").toLowerCase();
         const siteAddress = String(r.site_address ?? "").toLowerCase();
@@ -502,7 +452,7 @@ export async function GET(req: Request) {
 
     if (rawStatus !== "ALL") {
       filtered = filtered.filter(
-        (r: any) => String(r.status ?? "").toUpperCase() === rawStatus
+        (r) => String(r.status ?? "").toUpperCase() === rawStatus
       );
     }
 
@@ -519,7 +469,7 @@ export async function GET(req: Request) {
 
     const totalQuotes = filtered.length;
     const totalValue = filtered.reduce(
-      (s: number, r: any) => s + n2(r.total_amount),
+      (s, r) => s + n2(r.total_amount),
       0
     );
 
@@ -546,10 +496,11 @@ export async function GET(req: Request) {
         byStatus,
       },
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
     console.error("[GET /api/quotations] fatal", e);
-    return jsonError(500, {
-      error: e?.message ?? "Internal error",
-    });
+    return jsonError(500, { error: "Internal error" });
   }
 }

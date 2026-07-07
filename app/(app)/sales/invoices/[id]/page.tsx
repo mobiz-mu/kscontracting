@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import * as React from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -9,13 +9,11 @@ import {
   Calendar,
   Building2,
   Hash,
-  FileText,
   MessageCircle,
   Mail,
   MapPin,
   Percent,
   BadgeCheck,
-  Link2,
   Download,
   ShieldCheck,
   ExternalLink,
@@ -29,7 +27,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 
 type ApiCustomer = {
   id?: string | number | null;
@@ -57,6 +55,7 @@ type ApiInvoice = {
   vat_amount?: number | null;
   total_amount?: number | null;
   paid_amount?: number | null;
+  credited_amount?: number | null;
   balance_amount?: number | null;
   created_at?: string | null;
   issued_at?: string | null;
@@ -82,16 +81,13 @@ type ApiItem = {
 type InvoiceGetResponse = {
   ok: boolean;
   data?: { invoice?: ApiInvoice; items?: ApiItem[] };
-  error?: any;
-  supabaseError?: any;
-  details?: any;
+  error?: string;
 };
 
 type IssueResponse = {
   ok: boolean;
   data?: { id: string; invoice_no?: string; status?: string };
-  error?: any;
-  supabaseError?: any;
+  error?: string;
 };
 
 type ShareLinkResponse = {
@@ -102,17 +98,15 @@ type ShareLinkResponse = {
     invoice_no?: string;
     expires_at?: string;
   };
-  error?: any;
-  supabaseError?: any;
-  details?: any;
+  error?: string;
 };
 
-function n2(v: any) {
+function n2(v: unknown) {
   const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
 }
 
-function money(v: any) {
+function money(v: unknown) {
   const n = n2(v);
   return `Rs ${n.toLocaleString("en-MU", {
     minimumFractionDigits: 2,
@@ -137,8 +131,8 @@ function fmtDate(v?: string | null) {
   return `${dd}/${mm}/${yyyy}`;
 }
 
-function getParamId(p: any): string {
-  const raw = p?.id;
+function getParamId(p: unknown): string {
+  const raw = (p as Record<string, unknown> | null)?.id;
   if (Array.isArray(raw)) return String(raw[0] ?? "").trim();
   return String(raw ?? "").trim();
 }
@@ -351,7 +345,7 @@ export default function InvoiceDetailsPage() {
       const j = await safeJson<InvoiceGetResponse>(res);
 
       if (!j.ok) {
-        throw new Error(j?.error?.message ?? j?.error ?? "Invoice not found");
+        throw new Error(j?.error ?? "Invoice not found");
       }
 
       const inv = j.data?.invoice ?? null;
@@ -362,8 +356,8 @@ export default function InvoiceDetailsPage() {
       setLastSync(new Date());
 
       if (!inv) setErr("Invoice not found.");
-    } catch (e: any) {
-      setErr(e?.message || "Failed to load invoice");
+    } catch (e: unknown) {
+      setErr(getErrorMessage(e, "Failed to load invoice"));
       setInvoice(null);
       setItems([]);
     } finally {
@@ -389,18 +383,15 @@ export default function InvoiceDetailsPage() {
 
       if (!j.ok || !j.data?.share_url) {
         throw new Error(
-          j?.error?.message ??
-            j?.error ??
-            "Failed to create public secure invoice link"
+          j?.error ?? "Failed to create public secure invoice link"
         );
       }
 
       setShareUrl(j.data.share_url);
       setShareExpiresAt(j.data.expires_at ?? "");
       return j.data.share_url;
-    } catch (e: any) {
-      const message =
-        e?.message || "Failed to create public secure invoice link";
+    } catch (e: unknown) {
+      const message = getErrorMessage(e, "Failed to create public secure invoice link");
       setErr(message);
       throw new Error(message);
     } finally {
@@ -415,8 +406,8 @@ export default function InvoiceDetailsPage() {
       if (!url) return;
       await navigator.clipboard.writeText(url);
       alert("Public secure invoice link copied.");
-    } catch (e: any) {
-      alert(e?.message || "Failed to copy public invoice link");
+    } catch (e: unknown) {
+      alert(getErrorMessage(e, "Failed to copy public invoice link"));
     } finally {
       setCopyingShare(false);
     }
@@ -427,8 +418,8 @@ export default function InvoiceDetailsPage() {
       const url = shareUrl || (await createShareLink());
       if (!url) return;
       window.open(url, "_blank", "noopener,noreferrer");
-    } catch (e: any) {
-      alert(e?.message || "Failed to open public invoice");
+    } catch (e: unknown) {
+      alert(getErrorMessage(e, "Failed to open public invoice"));
     }
   }, [createShareLink, shareUrl]);
 
@@ -441,8 +432,8 @@ export default function InvoiceDetailsPage() {
         "_blank",
         "noopener,noreferrer"
       );
-    } catch (e: any) {
-      alert(e?.message || "Failed to open public PDF");
+    } catch (e: unknown) {
+      alert(getErrorMessage(e, "Failed to open public PDF"));
     }
   }, [createShareLink, shareUrl]);
 
@@ -472,8 +463,8 @@ export default function InvoiceDetailsPage() {
         "_blank",
         "noopener,noreferrer"
       );
-    } catch (e: any) {
-      alert(e?.message || "Failed to prepare WhatsApp invoice link");
+    } catch (e: unknown) {
+      alert(getErrorMessage(e, "Failed to prepare WhatsApp invoice link"));
     }
   }, [createShareLink, hasId, invoice, shareUrl]);
 
@@ -504,8 +495,8 @@ export default function InvoiceDetailsPage() {
       window.location.href = `mailto:?subject=${encodeURIComponent(
         emailSubject
       )}&body=${encodeURIComponent(emailBody)}`;
-    } catch (e: any) {
-      alert(e?.message || "Failed to prepare email invoice link");
+    } catch (e: unknown) {
+      alert(getErrorMessage(e, "Failed to prepare email invoice link"));
     }
   }, [createShareLink, hasId, invoice, shareUrl]);
 
@@ -522,12 +513,12 @@ export default function InvoiceDetailsPage() {
       });
 
       const j = await safeJson<IssueResponse>(res);
-      if (!j.ok) throw new Error(j?.error?.message ?? j?.error ?? "Issue failed");
+      if (!j.ok) throw new Error(j?.error ?? "Issue failed");
 
       await load();
       window.open(`/sales/invoices/${id}/print`, "_blank", "noopener,noreferrer");
-    } catch (e: any) {
-      setErr(e?.message || "Failed to issue invoice");
+    } catch (e: unknown) {
+      setErr(getErrorMessage(e, "Failed to issue invoice"));
     } finally {
       setIssuing(false);
     }
@@ -542,7 +533,8 @@ export default function InvoiceDetailsPage() {
   const subtotal = n2(invoice?.subtotal);
   const vat = n2(invoice?.vat_amount);
   const balance = n2(invoice?.balance_amount);
-  const paid = Math.max(0, total - balance);
+  const paid = n2(invoice?.paid_amount);
+  const credited = n2(invoice?.credited_amount);
 
   const statusKey = String(invoice?.status ?? "").toUpperCase();
   const canIssue = !!invoice && statusKey === "DRAFT";
@@ -706,10 +698,16 @@ export default function InvoiceDetailsPage() {
         </div>
       </Surface>
 
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-5">
         <MiniStat icon={Wallet} label="Subtotal" value={invoice ? money(subtotal) : "—"} />
         <MiniStat icon={Percent} label="VAT" value={invoice ? money(vat) : "—"} />
         <MiniStat icon={ReceiptText} label="Total" value={invoice ? money(total) : "—"} tone="navy" />
+        <MiniStat
+          icon={BadgeCheck}
+          label="Paid (cash)"
+          value={invoice ? money(paid) : "—"}
+          tone={paid > 0 ? "emerald" : undefined}
+        />
         <MiniStat
           icon={BadgeCheck}
           label="Balance"
@@ -717,6 +715,14 @@ export default function InvoiceDetailsPage() {
           tone={balance <= 0 ? "emerald" : "orange"}
         />
       </div>
+
+      {credited > 0 ? (
+        <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+          <span className="font-semibold">{money(credited)}</span> of this invoice has been
+          settled via credit note{credited === total ? "" : " (in addition to any cash payments above)"}.
+          This amount is <span className="font-semibold">not</span> cash received.
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-1 gap-4 2xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="space-y-4">
@@ -739,6 +745,14 @@ export default function InvoiceDetailsPage() {
                   >
                     Paid {money(paid)}
                   </Badge>
+                  {credited > 0 ? (
+                    <Badge
+                      variant="secondary"
+                      className="rounded-full border border-blue-200 bg-blue-50 text-blue-700"
+                    >
+                      Credited {money(credited)}
+                    </Badge>
+                  ) : null}
                   <Badge
                     variant="secondary"
                     className="rounded-full border border-slate-200 bg-slate-50 text-slate-700"

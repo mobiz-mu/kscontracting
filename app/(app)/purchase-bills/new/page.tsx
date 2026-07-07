@@ -7,6 +7,7 @@ import { ArrowLeft, Plus, Trash2, Save } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { getErrorMessage } from "@/lib/utils";
 
 type SubContractor = {
   id: number;
@@ -27,7 +28,7 @@ function money(v: number) {
   })}`;
 }
 
-function n2(v: any) {
+function n2(v: unknown) {
   const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
 }
@@ -151,8 +152,8 @@ export default function NewPurchaseBillPage() {
       }
 
       router.push(`/purchase-bills/${json.data.id}`);
-    } catch (e: any) {
-      alert(e?.message || "Failed to create purchase bill");
+    } catch (e: unknown) {
+      alert(getErrorMessage(e, "Failed to create purchase bill"));
     } finally {
       setSaving(false);
     }
@@ -241,7 +242,8 @@ export default function NewPurchaseBillPage() {
           </div>
 
           <div className="overflow-hidden rounded-xl border">
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-sm">
               <thead className="bg-slate-50">
                 <tr>
                   <th className="p-3 text-left">Description</th>
@@ -302,6 +304,7 @@ export default function NewPurchaseBillPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
 

@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import {
   ArrowLeft,
   RefreshCw,
@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 
 type ApiCreditNote = {
   id: string;
@@ -59,15 +59,15 @@ type CreditNoteApiResponse = {
     credit_note?: ApiCreditNote;
     items?: ApiItem[];
   };
-  error?: any;
+  error?: string;
 };
 
-function n2(v: any) {
+function n2(v: unknown) {
   const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
 }
 
-function money(v: any) {
+function money(v: unknown) {
   const n = n2(v);
   return `Rs ${n.toLocaleString("en-MU", {
     minimumFractionDigits: 2,
@@ -92,8 +92,8 @@ function fmtDate(v?: string | null) {
   return `${dd}/${mm}/${yyyy}`;
 }
 
-function getParamId(p: any): string {
-  const raw = p?.id;
+function getParamId(p: unknown): string {
+  const raw = (p as Record<string, unknown> | null)?.id;
   if (Array.isArray(raw)) return String(raw[0] ?? "").trim();
   return String(raw ?? "").trim();
 }
@@ -147,9 +147,25 @@ function Card3D({
   );
 }
 
+type ApplicationRow = {
+  id: number;
+  credit_note_id: string;
+  invoice_id: string;
+  amount: number;
+  applied_at: string;
+  reversed_at: string | null;
+  invoices?: { invoice_no: string | null } | { invoice_no: string | null }[] | null;
+};
+
+type InvoiceOption = {
+  id: string;
+  invoice_no: string;
+  balance_amount: number;
+  status: string;
+};
+
 export default function CreditNoteDetailsPage() {
   const params = useParams();
-  const router = useRouter();
 
   const id = React.useMemo(() => getParamId(params), [params]);
   const hasId = !!id && id !== "undefined" && id !== "null";
@@ -159,6 +175,58 @@ export default function CreditNoteDetailsPage() {
   const [err, setErr] = React.useState("");
   const [creditNote, setCreditNote] = React.useState<ApiCreditNote | null>(null);
   const [items, setItems] = React.useState<ApiItem[]>([]);
+
+  const [applications, setApplications] = React.useState<ApplicationRow[]>([]);
+  const [invoiceOptions, setInvoiceOptions] = React.useState<InvoiceOption[]>([]);
+  const [selectedInvoiceId, setSelectedInvoiceId] = React.useState("");
+  const [applyAmount, setApplyAmount] = React.useState("");
+  const [applying, setApplying] = React.useState(false);
+  const [applyErr, setApplyErr] = React.useState("");
+
+  const loadApplications = React.useCallback(async () => {
+    if (!hasId) return;
+    try {
+      const res = await fetch(`/api/credit-notes/${id}/apply`, { cache: "no-store" });
+      const j = await safeJson<{ ok: boolean; data?: ApplicationRow[] }>(res);
+      setApplications(j.data ?? []);
+    } catch {
+      // non-fatal for page load
+    }
+  }, [id, hasId]);
+
+  const loadInvoiceOptions = React.useCallback(async (customerId: number | null | undefined) => {
+    if (!customerId) {
+      setInvoiceOptions([]);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/invoices?customerId=${customerId}&pageSize=200`, {
+        cache: "no-store",
+      });
+      type InvoiceOptionRow = {
+        id: string;
+        invoice_no?: string | null;
+        status?: string | null;
+        balance_amount?: number | null;
+      };
+      const j = await safeJson<{ ok: boolean; data?: InvoiceOptionRow[] }>(res);
+      const opts = (j.data ?? [])
+        .filter((inv) => {
+          const status = String(inv.status ?? "").toUpperCase();
+          return status !== "DRAFT" && status !== "VOID" && n2(inv.balance_amount) > 0;
+        })
+        .map((inv) => ({
+          id: inv.id,
+          invoice_no: inv.invoice_no ?? "",
+          balance_amount: n2(inv.balance_amount),
+          status: inv.status ?? "",
+        }));
+      setInvoiceOptions(opts);
+    } catch {
+      setInvoiceOptions([]);
+    }
+  }, []);
+
 
   const load = React.useCallback(async () => {
     if (!hasId) return;
@@ -174,18 +242,72 @@ export default function CreditNoteDetailsPage() {
 
       setCreditNote(j.data?.credit_note ?? null);
       setItems(Array.isArray(j.data?.items) ? j.data!.items! : []);
-    } catch (e: any) {
-      setErr(e?.message || "Failed to load credit note");
+
+      void loadApplications();
+      void loadInvoiceOptions(j.data?.credit_note?.customer_id ?? null);
+    } catch (e: unknown) {
+      setErr(getErrorMessage(e, "Failed to load credit note"));
       setCreditNote(null);
       setItems([]);
     } finally {
       setLoading(false);
     }
-  }, [id, hasId]);
+  }, [id, hasId, loadApplications, loadInvoiceOptions]);
 
   React.useEffect(() => {
     void load();
   }, [load]);
+
+  const applyCredit = React.useCallback(async () => {
+    if (!hasId || !selectedInvoiceId) return;
+
+    const amountNum = n2(applyAmount);
+    if (amountNum <= 0) {
+      setApplyErr("Enter an amount greater than 0.");
+      return;
+    }
+
+    setApplying(true);
+    setApplyErr("");
+
+    try {
+      const res = await fetch(`/api/credit-notes/${id}/apply`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ invoice_id: selectedInvoiceId, amount: amountNum }),
+      });
+
+      const j = await safeJson<{ ok: boolean; error?: string }>(res);
+      if (!j.ok) throw new Error(j?.error || "Failed to apply credit note");
+
+      setSelectedInvoiceId("");
+      setApplyAmount("");
+      await load();
+    } catch (e: unknown) {
+      setApplyErr(getErrorMessage(e, "Failed to apply credit note"));
+    } finally {
+      setApplying(false);
+    }
+  }, [id, hasId, selectedInvoiceId, applyAmount, load]);
+
+  const reverseApplication = React.useCallback(
+    async (applicationId: number) => {
+      setApplyErr("");
+      try {
+        const res = await fetch(`/api/credit-notes/${id}/apply`, {
+          method: "DELETE",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ application_id: applicationId }),
+        });
+        const j = await safeJson<{ ok: boolean; error?: string }>(res);
+        if (!j.ok) throw new Error(j?.error || "Failed to reverse application");
+        await load();
+      } catch (e: unknown) {
+        setApplyErr(getErrorMessage(e, "Failed to reverse application"));
+      }
+    },
+    [id, load]
+  );
 
   const issueCreditNote = React.useCallback(async () => {
     if (!hasId) return;
@@ -199,14 +321,14 @@ export default function CreditNoteDetailsPage() {
         cache: "no-store",
       });
 
-      const j = await safeJson<{ ok: boolean; error?: any }>(res);
+      const j = await safeJson<{ ok: boolean; error?: string }>(res);
 
       if (!j.ok) throw new Error("Issue failed");
 
       await load();
       window.open(`/sales/credit-notes/${id}/print`, "_blank", "noopener,noreferrer");
-    } catch (e: any) {
-      setErr(e?.message || "Failed to issue credit note");
+    } catch (e: unknown) {
+      setErr(getErrorMessage(e, "Failed to issue credit note"));
     } finally {
       setIssuing(false);
     }
@@ -444,6 +566,123 @@ export default function CreditNoteDetailsPage() {
           </div>
         ) : null}
       </Card3D>
+
+      {String(creditNote?.status ?? "").toUpperCase() === "ISSUED" ? (
+        <Card3D className="p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-slate-900">
+                Apply to Invoice
+              </div>
+              <div className="mt-1 text-xs text-slate-500">
+                Reduce a customer invoice&apos;s outstanding balance using this
+                credit note. Remaining credit:{" "}
+                <span className="font-semibold text-slate-900">
+                  {money(creditNote?.remaining_amount)}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {n2(creditNote?.remaining_amount) <= 0 ? (
+            <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600 ring-1 ring-slate-200">
+              This credit note has been fully applied.
+            </div>
+          ) : (
+            <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_180px_auto]">
+              <select
+                value={selectedInvoiceId}
+                onChange={(e) => setSelectedInvoiceId(e.target.value)}
+                className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#ff7a18] focus:ring-4 focus:ring-[#ff7a18]/10"
+              >
+                <option value="">Select an invoice…</option>
+                {invoiceOptions.map((inv) => (
+                  <option key={inv.id} value={inv.id}>
+                    {inv.invoice_no} — balance {money(inv.balance_amount)}
+                  </option>
+                ))}
+              </select>
+
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                placeholder="Amount"
+                value={applyAmount}
+                onChange={(e) => setApplyAmount(e.target.value)}
+                className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-[#ff7a18] focus:ring-4 focus:ring-[#ff7a18]/10"
+              />
+
+              <Button
+                onClick={applyCredit}
+                disabled={applying || !selectedInvoiceId || !applyAmount}
+                className="h-11 rounded-2xl bg-[#071b38] text-white hover:bg-[#06142b]"
+              >
+                {applying ? <RefreshCw className="mr-2 size-4 animate-spin" /> : null}
+                Apply
+              </Button>
+            </div>
+          )}
+
+          {invoiceOptions.length === 0 ? (
+            <div className="mt-2 text-xs text-slate-400">
+              No open invoices with a balance found for this customer.
+            </div>
+          ) : null}
+
+          {applyErr ? (
+            <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              {applyErr}
+            </div>
+          ) : null}
+
+          {applications.length > 0 ? (
+            <div className="mt-5">
+              <div className="text-xs font-semibold text-slate-500">
+                Application history
+              </div>
+              <div className="mt-2 divide-y divide-slate-100 rounded-2xl ring-1 ring-slate-200">
+                {applications.map((app) => {
+                  const invoiceNo = Array.isArray(app.invoices)
+                    ? app.invoices[0]?.invoice_no
+                    : app.invoices?.invoice_no;
+
+                  return (
+                    <div
+                      key={app.id}
+                      className="flex items-center justify-between gap-3 px-4 py-3 text-sm"
+                    >
+                      <div>
+                        <div className="font-semibold text-slate-900">
+                          {invoiceNo ?? app.invoice_id}
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          {fmtDate(app.applied_at)}
+                          {app.reversed_at ? " • reversed" : ""}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="font-semibold text-slate-900">
+                          {money(app.amount)}
+                        </span>
+                        {!app.reversed_at ? (
+                          <button
+                            type="button"
+                            onClick={() => reverseApplication(app.id)}
+                            className="text-xs font-semibold text-rose-600 hover:text-rose-700"
+                          >
+                            Reverse
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+        </Card3D>
+      ) : null}
     </div>
   );
 }

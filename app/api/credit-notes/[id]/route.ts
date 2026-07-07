@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
+import { requirePermission } from "@/lib/authz";
 import {
-  createSupabaseServerClient,
   createSupabaseAdminClient,
 } from "@/lib/supabase/server";
 
@@ -8,17 +8,8 @@ export const runtime = "nodejs";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-function jsonError(status: number, payload: any) {
+function jsonError(status: number, payload: Record<string, unknown>) {
   return NextResponse.json({ ok: false, ...payload }, { status });
-}
-
-function safeError(err: any) {
-  return {
-    message: err?.message ?? "Unknown error",
-    code: err?.code ?? null,
-    details: err?.details ?? null,
-    hint: err?.hint ?? null,
-  };
 }
 
 function isUuid(v: string) {
@@ -40,15 +31,7 @@ export async function GET(_req: Request, ctx: RouteContext) {
   }
 
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: uErr } = await supabase.auth.getUser();
-
-    if (uErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(uErr),
-      });
-    }
+    await requirePermission("credit_notes.view");
 
     const admin = createSupabaseAdminClient();
 
@@ -75,14 +58,11 @@ export async function GET(_req: Request, ctx: RouteContext) {
         created_by
       `)
       .eq("id", safeId)
-      .eq("created_by", userRes.user.id)
       .maybeSingle();
 
     if (noteErr) {
-      return jsonError(500, {
-        error: "Failed to load credit note",
-        supabaseError: safeError(noteErr),
-      });
+      console.error("[credit-notes/[id]]", noteErr);
+      return jsonError(500, { error: "Failed to load credit note" });
     }
 
     if (!creditNote) {
@@ -105,10 +85,8 @@ export async function GET(_req: Request, ctx: RouteContext) {
         .maybeSingle();
 
       if (customerErr) {
-        return jsonError(500, {
-          error: "Failed to load credit note customer",
-          supabaseError: safeError(customerErr),
-        });
+        console.error("[credit-notes/[id]]", customerErr);
+      return jsonError(500, { error: "Failed to load credit note customer" });
       }
 
       customer = customerData ?? null;
@@ -130,10 +108,8 @@ export async function GET(_req: Request, ctx: RouteContext) {
       .order("id", { ascending: true });
 
     if (itemsErr) {
-      return jsonError(500, {
-        error: "Failed to load credit note items",
-        supabaseError: safeError(itemsErr),
-      });
+      console.error("[credit-notes/[id]]", itemsErr);
+      return jsonError(500, { error: "Failed to load credit note items" });
     }
 
     return NextResponse.json({
@@ -162,7 +138,7 @@ export async function GET(_req: Request, ctx: RouteContext) {
           voided_at: creditNote.voided_at ?? null,
           void_reason: creditNote.void_reason ?? null,
         },
-        items: (items ?? []).map((item: any) => ({
+        items: (items ?? []).map((item) => ({
           id: item.id,
           credit_note_id: item.credit_note_id,
           description: item.description,
@@ -178,8 +154,11 @@ export async function GET(_req: Request, ctx: RouteContext) {
         })),
       },
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
     console.error("[GET /api/credit-notes/[id]] fatal", e);
-    return jsonError(500, { error: e?.message ?? "Internal error" });
+    return jsonError(500, { error: "Internal error" });
   }
 }

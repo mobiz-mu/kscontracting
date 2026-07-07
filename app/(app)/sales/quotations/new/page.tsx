@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -23,7 +23,7 @@ import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 
 type CustomerMode = "LIST" | "MANUAL";
 
@@ -79,12 +79,10 @@ type Quote = {
 type QuoteGetResponse = {
   ok: boolean;
   data?: Quote;
-  error?: any;
-  supabaseError?: any;
-  details?: any;
+  error?: string;
 };
 
-function n2(v: any) {
+function n2(v: unknown) {
   const s = String(v ?? "").trim();
   if (!s) return 0;
   const x = Number(s);
@@ -114,7 +112,7 @@ function pad4(n: number) {
   return String(n).padStart(4, "0");
 }
 
-function isDraftStatus(v: any) {
+function isDraftStatus(v: unknown) {
   return String(v ?? "").trim().toUpperCase() === "DRAFT";
 }
 
@@ -218,9 +216,9 @@ export default function NewQuotationPage() {
       .slice(0, 10);
   }, [customers, custQuery]);
 
-  function updateItem(index: number, field: keyof Item, value: any) {
+  function updateItem(index: number, field: "description" | "qty" | "price", value: string) {
     const newItems = [...items];
-    (newItems[index] as any)[field] = value;
+    newItems[index] = { ...newItems[index], [field]: value };
 
     const qty = n2(newItems[index].qty);
     const price = n2(newItems[index].price);
@@ -357,8 +355,8 @@ export default function NewQuotationPage() {
       }
 
       router.push(`/sales/quotations/${savedId}`);
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e: unknown) {
+      alert(getErrorMessage(e, "Failed to save quotation"));
     } finally {
       setLoading(false);
     }
@@ -391,7 +389,7 @@ export default function NewQuotationPage() {
 
     (async () => {
       try {
-        const j = await safeGet<{ ok: boolean; data?: any }>("/api/settings/company");
+        const j = await safeGet<{ ok: boolean; data?: Record<string, unknown> }>("/api/settings/company");
         const s = j?.data ?? {};
 
         const prefix = String(s.quote_prefix ?? "QTN").trim() || "QTN";
@@ -416,7 +414,7 @@ export default function NewQuotationPage() {
     (async () => {
       setCustLoading(true);
       try {
-        const j = await safeGet<{ ok: boolean; data?: any[] }>("/api/customers");
+        const j = await safeGet<{ ok: boolean; data?: Array<{ id: number; name?: string | null }> }>("/api/customers");
         const list = (j?.data ?? []) as Customer[];
         if (!alive) return;
         setCustomers(list);
@@ -498,8 +496,8 @@ export default function NewQuotationPage() {
         if (statusKey !== "DRAFT") {
           alert("Only draft quotations can be edited.");
         }
-      } catch (e: any) {
-        alert(e?.message || "Failed to load draft quotation.");
+      } catch (e: unknown) {
+        alert(getErrorMessage(e, "Failed to load draft quotation."));
       } finally {
         if (alive) setLoadingExisting(false);
       }

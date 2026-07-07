@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import * as React from "react";
 import Link from "next/link";
@@ -37,6 +37,7 @@ type ApiInvoice = {
   vat_amount?: number | null;
   total_amount?: number | null;
   paid_amount?: number | null;
+  credited_amount?: number | null;
   balance_amount?: number | null;
   created_at?: string | null;
   issued_at?: string | null;
@@ -45,6 +46,12 @@ type ApiInvoice = {
   customer_vat?: string | null;
   customer_brn?: string | null;
   customer_address?: string | null;
+  // Legacy/alternate field names some older records may still use.
+  client_name?: string | null;
+  client_address?: string | null;
+  client_brn?: string | null;
+  client_vat?: string | null;
+  customer_vat_no?: string | null;
   customers?: {
     id?: string | number | null;
     name?: string | null;
@@ -66,13 +73,13 @@ type ApiItem = {
   line_total?: number;
 };
 
-function n2(v: any) {
+function n2(v: unknown) {
   const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
 }
 
 function getParamId(params: unknown): string {
-  const p = params as any;
+  const p = params as Record<string, unknown> | null;
   const raw = p?.id;
   if (Array.isArray(raw)) return String(raw[0] ?? "").trim();
   return String(raw ?? "").trim();
@@ -159,7 +166,7 @@ export default function InvoicePrintPage() {
       const j = await safeGet<{
         ok: boolean;
         data: { invoice?: ApiInvoice; items?: ApiItem[] };
-        error?: any;
+        error?: string;
       }>(`/api/invoices/${encodeURIComponent(id)}`);
 
       if (!j.ok) throw new Error(j?.error ?? "Invoice not found");
@@ -170,8 +177,8 @@ export default function InvoicePrintPage() {
       setInvoice(inv);
       setItems(Array.isArray(its) ? its : []);
       if (!inv) setErr("Invoice not found.");
-    } catch (e: any) {
-      setErr(e?.message || "Failed to load invoice");
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "Failed to load invoice");
       setInvoice(null);
       setItems([]);
     } finally {
@@ -319,12 +326,8 @@ export default function InvoicePrintPage() {
     const subtotal = n2(invoice.subtotal);
     const vat = n2(invoice.vat_amount);
     const balance = n2(invoice.balance_amount);
-
-    const paidRaw = invoice.paid_amount;
-    const paid =
-      typeof paidRaw === "number" && Number.isFinite(paidRaw)
-        ? n2(paidRaw)
-        : Math.max(0, total - balance);
+    const credited = n2(invoice.credited_amount);
+    const paid = n2(invoice.paid_amount);
 
     const cust = invoice.customers ?? null;
     const invoiceType = invoiceTypeLabel(invoice.invoice_type);
@@ -337,8 +340,8 @@ export default function InvoicePrintPage() {
         signatureSrc: "/ks-signature.png",
         addressLines: [
           "MORCELLEMENT CARLOS, TAMARIN",
-          "Tel: 5941 6756 â€¢ Email: ks.contracting@hotmail.com",
-          "BRN: C18160190 â€¢ VAT: 27658608",
+          "Tel: 5941 6756 • Email: ks.contracting@hotmail.com",
+          "BRN: C18160190 • VAT: 27658608",
         ],
       },
       doc: {
@@ -357,50 +360,50 @@ export default function InvoicePrintPage() {
       
  billTo: {
   name:
-    (invoice as any)?.customer_name ||
-    (invoice as any)?.client_name ||
+    invoice?.customer_name ||
+    invoice?.client_name ||
     cust?.name ||
     "",
   address:
-    (invoice as any)?.customer_address ||
-    (invoice as any)?.client_address ||
+    invoice?.customer_address ||
+    invoice?.client_address ||
     cust?.address ||
     invoice.site_address ||
     "",
   brn:
-    (invoice as any)?.customer_brn ||
-    (invoice as any)?.client_brn ||
+    invoice?.customer_brn ||
+    invoice?.client_brn ||
     cust?.brn ||
     "",
   vat:
-    (invoice as any)?.customer_vat ||
-    (invoice as any)?.customer_vat_no ||
-    (invoice as any)?.client_vat ||
+    invoice?.customer_vat ||
+    invoice?.customer_vat_no ||
+    invoice?.client_vat ||
     cust?.vat_no ||
     "",
   siteAddress: invoice.site_address ?? "",
   lines: [
-    (invoice as any)?.customer_name
-      ? `Name: ${(invoice as any).customer_name}`
-      : (invoice as any)?.client_name
-      ? `Name: ${(invoice as any).client_name}`
+    invoice?.customer_name
+      ? `Name: ${invoice.customer_name}`
+      : invoice?.client_name
+      ? `Name: ${invoice.client_name}`
       : "",
-    (invoice as any)?.customer_address
-      ? `Address: ${(invoice as any).customer_address}`
-      : (invoice as any)?.client_address
-      ? `Address: ${(invoice as any).client_address}`
+    invoice?.customer_address
+      ? `Address: ${invoice.customer_address}`
+      : invoice?.client_address
+      ? `Address: ${invoice.client_address}`
       : "",
-    (invoice as any)?.customer_brn
-      ? `BRN No.: ${(invoice as any).customer_brn}`
-      : (invoice as any)?.client_brn
-      ? `BRN No.: ${(invoice as any).client_brn}`
+    invoice?.customer_brn
+      ? `BRN No.: ${invoice.customer_brn}`
+      : invoice?.client_brn
+      ? `BRN No.: ${invoice.client_brn}`
       : "",
-    (invoice as any)?.customer_vat
-      ? `VAT No.: ${(invoice as any).customer_vat}`
-      : (invoice as any)?.customer_vat_no
-      ? `VAT No.: ${(invoice as any).customer_vat_no}`
-      : (invoice as any)?.client_vat
-      ? `VAT No.: ${(invoice as any).client_vat}`
+    invoice?.customer_vat
+      ? `VAT No.: ${invoice.customer_vat}`
+      : invoice?.customer_vat_no
+      ? `VAT No.: ${invoice.customer_vat_no}`
+      : invoice?.client_vat
+      ? `VAT No.: ${invoice.client_vat}`
       : "",
     invoice.site_address ? `Site Address: ${invoice.site_address}` : "",
   ].filter(Boolean),
@@ -439,6 +442,7 @@ export default function InvoicePrintPage() {
         vat,
         total,
         paid,
+        credited,
         balance,
       },
       notes: invoice.notes?.trim() || "MCB 000446509687",
@@ -565,7 +569,7 @@ export default function InvoicePrintPage() {
                 ) : (
                   <div className="print:hidden rounded-[28px] border border-slate-200 bg-white p-6 text-sm text-slate-600 shadow-[0_18px_60px_rgba(2,6,23,0.08)]">
                     {loading
-                      ? "Loading invoiceâ€¦"
+                      ? "Loading invoice…"
                       : hasId
                       ? "No document available."
                       : "Missing invoice id."}
@@ -580,11 +584,11 @@ export default function InvoicePrintPage() {
       <div className="mt-3 text-xs text-slate-400 print:hidden">
         {invoice ? (
           <>
-            Loaded: <span className="font-semibold">{invoice.invoice_no}</span> â€¢ Items:{" "}
+            Loaded: <span className="font-semibold">{invoice.invoice_no}</span> • Items:{" "}
             <span className="font-semibold">{items.length}</span>
           </>
         ) : (
-          "â€”"
+          "—"
         )}
       </div>
     </div>

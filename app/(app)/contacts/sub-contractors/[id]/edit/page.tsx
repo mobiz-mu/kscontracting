@@ -21,7 +21,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 
 type SubContractor = {
   id: string | number;
@@ -79,7 +79,7 @@ function Chip({
 export default function EditSubContractorPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
-  const id = String((params as any)?.id ?? "").trim();
+  const id = String((params as Record<string, unknown> | null)?.id ?? "").trim();
 
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
@@ -123,8 +123,8 @@ export default function EditSubContractorPage() {
       setContactPerson(row.contact_person ?? "");
       setNotes(row.notes ?? "");
       setIsActive(row.is_active ?? true);
-    } catch (e: any) {
-      setError(e?.message || "Failed to load sub contractor");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to load sub contractor"));
     } finally {
       setLoading(false);
     }
@@ -170,8 +170,8 @@ export default function EditSubContractorPage() {
       window.setTimeout(() => {
         router.push(`/contacts/sub-contractors/${id}`);
       }, 500);
-    } catch (e: any) {
-      setError(e?.message || "Failed to update sub contractor");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to update sub contractor"));
     } finally {
       setSaving(false);
     }
@@ -179,6 +179,7 @@ export default function EditSubContractorPage() {
 
   React.useEffect(() => {
     if (id) void load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: load on mount/param change only
   }, [id]);
 
   if (loading) {

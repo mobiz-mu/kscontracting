@@ -8,7 +8,6 @@ import {
   Save,
   RefreshCw,
   CheckCircle2,
-  FileText,
   Percent,
   Hash,
   Palette,
@@ -18,7 +17,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 
 /* =========================
    Types
@@ -66,7 +65,7 @@ type RolePermissionRow = {
 type CompanyApiResponse = {
   ok: boolean;
   data?: CompanySettingsRow;
-  error?: any;
+  error?: string;
 };
 
 type AccessApiResponse = {
@@ -76,7 +75,7 @@ type AccessApiResponse = {
     permissions: PermissionRow[];
     role_permissions: RolePermissionRow[];
   };
-  error?: any;
+  error?: string;
 };
 
 const DEFAULT_SETTINGS: CompanySettingsRow = {
@@ -125,7 +124,7 @@ async function safeGet<T>(url: string): Promise<T> {
   return JSON.parse(raw) as T;
 }
 
-async function safePost<T>(url: string, body: any): Promise<T> {
+async function safePost<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -315,8 +314,8 @@ export default function SettingsPage() {
       setRoles(accessRes.data.roles ?? []);
       setPermissions(accessRes.data.permissions ?? []);
       setRolePermissions(accessRes.data.role_permissions ?? []);
-    } catch (e: any) {
-      setError(e?.message || "Failed to load settings");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to load settings"));
     } finally {
       setLoading(false);
     }
@@ -388,8 +387,8 @@ export default function SettingsPage() {
       setSettings(res.data);
       setSaved(true);
       window.setTimeout(() => setSaved(false), 2200);
-    } catch (e: any) {
-      setError(e?.message || "Failed to save company settings");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to save company settings"));
     } finally {
       setSavingCompany(false);
     }
@@ -407,8 +406,8 @@ export default function SettingsPage() {
 
       setSaved(true);
       window.setTimeout(() => setSaved(false), 2200);
-    } catch (e: any) {
-      setError(e?.message || "Failed to save access settings");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to save access settings"));
     } finally {
       setSavingAccess(false);
     }

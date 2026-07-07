@@ -32,7 +32,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 
 import {
   DropdownMenu,
@@ -77,20 +77,19 @@ type QuotesResponse = {
     expiredCount: number;
     byStatus: Record<string, number>;
   };
-  error?: any;
-  supabaseError?: any;
+  error?: string;
 };
 
 /* =========================================
    Helpers
 ========================================= */
 
-function n2(v: any) {
+function n2(v: unknown) {
   const x = Number(v ?? 0);
   return Number.isFinite(x) ? x : 0;
 }
 
-function money(v: any) {
+function money(v: unknown) {
   const n = n2(v);
   return `Rs ${n.toLocaleString("en-MU", {
     minimumFractionDigits: 2,
@@ -115,7 +114,7 @@ function fmtDate(v?: string | null) {
   return `${dd}/${mm}/${yyyy}`;
 }
 
-function safeId(id: any) {
+function safeId(id: unknown) {
   const s = String(id ?? "").trim();
   if (!s || s === "undefined" || s === "null") return "";
   return s;
@@ -377,14 +376,14 @@ export default function QuotationsPage() {
       );
       if (!res.ok)
         throw new Error(
-          res?.error?.message ?? res?.error ?? "Failed to load quotations"
+          res?.error ?? "Failed to load quotations"
         );
 
       setRows(Array.isArray(res.data) ? res.data : []);
       setMeta(res.meta ?? null);
       setKpi(res.kpi ?? null);
-    } catch (e: any) {
-      setErr(e?.message || "Failed to load quotations");
+    } catch (e: unknown) {
+      setErr(getErrorMessage(e, "Failed to load quotations"));
       setRows([]);
       setMeta(null);
       setKpi(null);

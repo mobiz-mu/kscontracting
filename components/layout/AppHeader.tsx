@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
@@ -22,7 +22,7 @@ type PermissionsResponse = {
     roleKeys: string[];
     permissions: string[];
   };
-  error?: any;
+  error?: string;
 };
 
 function safeGet<T>(url: string): Promise<T> {
@@ -230,9 +230,9 @@ export default function AppHeader() {
 
         setRoleKeys(Array.isArray(permsRes.data.roleKeys) ? permsRes.data.roleKeys : []);
         setPermissions(Array.isArray(permsRes.data.permissions) ? permsRes.data.permissions : []);
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (!alive) return;
-        setPermError(e?.message || "Failed to load permissions");
+        setPermError(e instanceof Error ? e.message : "Failed to load permissions");
         setRoleKeys([]);
         setPermissions([]);
       } finally {

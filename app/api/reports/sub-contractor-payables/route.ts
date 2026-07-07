@@ -1,35 +1,20 @@
 import { NextResponse } from "next/server";
-import {
-  createSupabaseServerClient,
-  createSupabaseAdminClient,
-} from "@/lib/supabase/server";
+import { requirePermission } from "@/lib/authz";
+import { createSupabaseAdminClient } from "@/lib/supabase/server";
+import { parseReportFilters } from "@/lib/reports/period";
 
 export const runtime = "nodejs";
 
-function jsonError(status: number, payload: any) {
+function jsonError(status: number, payload: Record<string, unknown>) {
   return NextResponse.json({ ok: false, ...payload }, { status });
 }
 
-function safeError(err: any) {
-  return {
-    message: err?.message ?? "Unknown error",
-    code: err?.code ?? null,
-    details: err?.details ?? null,
-    hint: err?.hint ?? null,
-  };
-}
-
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: uErr } = await supabase.auth.getUser();
+    await requirePermission("reports.view");
 
-    if (uErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(uErr),
-      });
-    }
+    const url = new URL(req.url);
+    const { from, to, period } = parseReportFilters(url.searchParams);
 
     const supabaseAdmin = createSupabaseAdminClient();
 
@@ -55,25 +40,28 @@ export async function GET() {
       .order("name", { ascending: true });
 
     if (error) {
-      return jsonError(500, {
-        error: "Failed to load payable summary",
-        supabaseError: safeError(error),
-      });
+      console.error("[reports/sub-contractor-payables]", error);
+      return jsonError(500, { error: "Failed to load payable summary" });
     }
 
-    const rows = (subs ?? []).map((sub: any) => {
-      const bills = Array.isArray(sub.purchase_bills) ? sub.purchase_bills : [];
+    const rows = (subs ?? []).map((sub) => {
+      const allBills = Array.isArray(sub.purchase_bills) ? sub.purchase_bills : [];
+      const bills = allBills.filter((bill) => {
+        const billDate = String(bill.bill_date ?? "").slice(0, 10);
+        if (!billDate) return true;
+        return billDate >= from && billDate <= to;
+      });
 
       const totalBilled = bills.reduce(
-        (s: number, x: any) => s + Number(x.total_amount ?? 0),
+        (s, x) => s + Number(x.total_amount ?? 0),
         0
       );
       const totalPaid = bills.reduce(
-        (s: number, x: any) => s + Number(x.paid_amount ?? 0),
+        (s, x) => s + Number(x.paid_amount ?? 0),
         0
       );
       const totalOutstanding = bills.reduce(
-        (s: number, x: any) => s + Number(x.balance_amount ?? 0),
+        (s, x) => s + Number(x.balance_amount ?? 0),
         0
       );
 
@@ -92,11 +80,13 @@ export async function GET() {
     return NextResponse.json({
       ok: true,
       data: rows,
+      meta: { period, from, to },
     });
-  } catch (e: any) {
-    return jsonError(500, {
-      error: "Internal error",
-      supabaseError: safeError(e),
-    });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
+    console.error("[reports/sub-contractor-payables]", e);
+    return jsonError(500, { error: "Internal error" });
   }
 }

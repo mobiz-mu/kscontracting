@@ -1,37 +1,26 @@
 import { NextResponse } from "next/server";
-import {
-  createSupabaseServerClient,
-  createSupabaseAdminClient,
-} from "@/lib/supabase/server";
+import { requirePermission } from "@/lib/authz";
+import { createSupabaseAdminClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
-function jsonError(status: number, payload: any) {
+function jsonError(status: number, payload: Record<string, unknown>) {
   return NextResponse.json({ ok: false, ...payload }, { status });
 }
 
-function safeError(err: any) {
-  return {
-    message: err?.message ?? "Unknown error",
-    code: err?.code ?? null,
-    details: err?.details ?? null,
-    hint: err?.hint ?? null,
-  };
-}
-
-function n2(v: any) {
+function n2(v: unknown) {
   const x = Number(v ?? 0);
   return Number.isFinite(x) ? x : 0;
 }
 
-function qtyForCalc(v: any) {
+function qtyForCalc(v: unknown) {
   const s = String(v ?? "").trim();
   if (!s) return 1;
   const x = Number(s);
   return Number.isFinite(x) ? x : 1;
 }
 
-function normalizeInvoiceType(v: any) {
+function normalizeInvoiceType(v: unknown) {
   const s = String(v ?? "").trim().toUpperCase();
 
   if (s === "PRO_FORMA" || s === "PROFORMA") return "PRO_FORMA";
@@ -41,7 +30,7 @@ function normalizeInvoiceType(v: any) {
   return "VAT_INVOICE";
 }
 
-function normalizeStatus(v: any) {
+function normalizeStatus(v: unknown) {
   const raw = String(v ?? "").trim().toUpperCase();
 
   if (raw === "ALL") return "ALL";
@@ -82,7 +71,9 @@ async function getNextFreeInvoiceNo(
     );
   }
 
-  const filtered = (existingRows ?? []).filter((x: any) => {
+type InvoiceNoRow = { invoice_no: string | null; invoice_type: string | null };
+
+  const filtered = ((existingRows ?? []) as InvoiceNoRow[]).filter((x) => {
     const type = String(x.invoice_type ?? "").toUpperCase();
 
     if (isProForma) {
@@ -97,7 +88,7 @@ async function getNextFreeInvoiceNo(
   });
 
   const nums = filtered
-    .map((x: any) => parseInvNo(String(x.invoice_no ?? "")))
+    .map((x) => parseInvNo(String(x.invoice_no ?? "")))
     .filter((n) => Number.isFinite(n)) as number[];
 
   const maxExisting = nums.length ? Math.max(...nums) : 0;
@@ -128,21 +119,19 @@ async function bumpCompanySettingsCounter(
 
 export async function POST(req: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: uErr } = await supabase.auth.getUser();
-
-    if (uErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(uErr),
-      });
-    }
-
     const body = await req.json().catch(() => ({}));
-    const admin = createSupabaseAdminClient();
 
     const requestedInvoiceNo = String(body.invoice_no ?? "").trim();
     const invoiceId = String(body.id ?? "").trim() || null;
+
+    // Editing an existing invoice requires invoices.edit; creating a new one
+    // requires invoices.create. A user with only one of these must not be
+    // able to perform the other action through this shared endpoint.
+    const authz = invoiceId
+      ? await requirePermission("invoices.edit")
+      : await requirePermission("invoices.create");
+
+    const admin = createSupabaseAdminClient();
 
     const rawCustomerId = body.customer_id;
     const customerIdNum =
@@ -205,9 +194,15 @@ export async function POST(req: Request) {
 
     const vat_rate = 0.15;
 
-    const rows = Array.isArray(body.rows) ? body.rows : [];
+    type RawInvoiceItemInput = {
+      description?: unknown;
+      qty?: unknown;
+      price?: unknown;
+    };
+
+    const rows: RawInvoiceItemInput[] = Array.isArray(body.rows) ? body.rows : [];
     const cleanRows = rows
-      .map((r: any) => {
+      .map((r) => {
         const description = String(r.description ?? "").trim();
         const rawQty = String(r.qty ?? "").trim();
         const rawPrice = String(r.price ?? "").trim();
@@ -221,7 +216,7 @@ export async function POST(req: Request) {
         };
       })
       .filter(
-        (r: any) => r.hasAnyValue && r.description.length > 0 && r.qty > 0
+        (r) => r.hasAnyValue && r.description.length > 0 && r.qty > 0
       );
 
     if (cleanRows.length === 0) {
@@ -231,7 +226,7 @@ export async function POST(req: Request) {
     }
 
     const computedSubtotal = cleanRows.reduce(
-      (s: number, r: any) => s + n2(r.qty) * n2(r.unit_price_excl_vat),
+      (s, r) => s + n2(r.qty) * n2(r.unit_price_excl_vat),
       0
     );
     const computedVat = computedSubtotal * vat_rate;
@@ -262,7 +257,7 @@ export async function POST(req: Request) {
       }
     }
 
-    let savedInvoice: any = null;
+    let savedInvoice: Record<string, unknown> | null = null;
 
     if (!invoiceId) {
       let invoice_no =
@@ -286,10 +281,10 @@ export async function POST(req: Request) {
         total_amount: computedTotal,
         paid_amount,
         balance_amount,
-        created_by: userRes.user.id,
+        created_by: authz.userId,
       };
 
-      let lastError: any = null;
+      let lastError: unknown = null;
 
       for (let attempt = 0; attempt < 6; attempt++) {
         const { data, error } = await admin
@@ -336,20 +331,16 @@ export async function POST(req: Request) {
           error?.code === "23505";
 
         if (!isDuplicate) {
-          return jsonError(500, {
-            error: error?.message ?? "Failed to create invoice",
-            supabaseError: safeError(error),
-          });
+          console.error("[invoices]", error);
+          return jsonError(500, { error: "Failed to create invoice" });
         }
 
         invoice_no = await getNextFreeInvoiceNo(admin, invoice_type, invoice_no);
       }
 
       if (!savedInvoice) {
-        return jsonError(500, {
-          error: lastError?.message ?? "Failed to create invoice",
-          supabaseError: safeError(lastError),
-        });
+        console.error("[invoices]", lastError);
+        return jsonError(500, { error: "Failed to create invoice" });
       }
     } else {
       const { data: existingInvoice, error: existingErr } = await admin
@@ -362,14 +353,11 @@ export async function POST(req: Request) {
           created_by
         `)
         .eq("id", invoiceId)
-        .eq("created_by", userRes.user.id)
         .maybeSingle();
 
       if (existingErr) {
-        return jsonError(500, {
-          error: "Failed to load existing invoice",
-          supabaseError: safeError(existingErr),
-        });
+        console.error("[invoices/ts]", existingErr);
+      return jsonError(500, { error: "Failed to load existing invoice" });
       }
 
       if (!existingInvoice) {
@@ -418,7 +406,6 @@ export async function POST(req: Request) {
         .from("invoices")
         .update(invoicePayload)
         .eq("id", invoiceId)
-        .eq("created_by", userRes.user.id)
         .select(`
           id,
           invoice_no,
@@ -449,11 +436,11 @@ export async function POST(req: Request) {
           msg.includes("invoices_invoice_no_key") ||
           error?.code === "23505";
 
+        console.error("[invoices]", error);
         return jsonError(isDuplicate ? 409 : 500, {
           error: isDuplicate
             ? "Invoice number already exists"
-            : error?.message ?? "Failed to update invoice",
-          supabaseError: safeError(error),
+            : "Failed to update invoice",
         });
       }
 
@@ -468,14 +455,14 @@ export async function POST(req: Request) {
       .eq("invoice_id", savedId);
 
     if (delErr) {
+      console.error("[invoices]", delErr);
       return jsonError(500, {
         error: "Invoice saved but failed to clear existing items",
         invoice_id: savedId,
-        supabaseError: safeError(delErr),
       });
     }
 
-    const insertRows = cleanRows.map((x: any) => {
+    const insertRows = cleanRows.map((x) => {
       const base = n2(x.qty) * n2(x.unit_price_excl_vat);
       const vAmt = base * vat_rate;
       const lineTotal = base + vAmt;
@@ -500,10 +487,10 @@ export async function POST(req: Request) {
       .order("id", { ascending: true });
 
     if (itemsErr) {
+      console.error("[invoices]", itemsErr);
       return jsonError(500, {
         error: "Invoice saved but items insert failed",
         invoice_id: savedId,
-        supabaseError: safeError(itemsErr),
       });
     }
 
@@ -514,29 +501,48 @@ export async function POST(req: Request) {
         items: itemsData ?? [],
       },
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
     console.error("[POST /api/invoices] fatal", e);
-    return jsonError(500, { error: e?.message ?? "Internal error" });
+    return jsonError(500, { error: "Internal error" });
   }
 }
 
+type InvoiceListRow = {
+  id: string;
+  invoice_no: string;
+  customer_id: number | null;
+  customer_name: string | null;
+  customer_vat: string | null;
+  customer_brn: string | null;
+  customer_address: string | null;
+  invoice_type: string | null;
+  invoice_date: string | null;
+  due_date: string | null;
+  site_address: string | null;
+  status: string | null;
+  notes: string | null;
+  subtotal: number | null;
+  vat_amount: number | null;
+  total_amount: number | null;
+  paid_amount: number | null;
+  credited_amount: number | null;
+  balance_amount: number | null;
+  created_at: string | null;
+};
+
 export async function GET(req: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: uErr } = await supabase.auth.getUser();
-
-    if (uErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(uErr),
-      });
-    }
+    await requirePermission("invoices.view");
 
     const admin = createSupabaseAdminClient();
 
     const url = new URL(req.url);
     const q = (url.searchParams.get("q") ?? "").trim();
     const rawStatus = normalizeStatus(url.searchParams.get("status") ?? "ALL");
+    const customerIdFilter = url.searchParams.get("customerId");
 
     const page = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
     const pageSize = Math.min(
@@ -544,7 +550,7 @@ export async function GET(req: Request) {
       Math.max(10, Number(url.searchParams.get("pageSize") ?? "25") || 25)
     );
 
-    const { data: invoiceBase, error: baseErr } = await admin
+    let baseQuery = admin
       .from("invoices")
       .select(`
         id,
@@ -564,26 +570,33 @@ export async function GET(req: Request) {
         vat_amount,
         total_amount,
         paid_amount,
+        credited_amount,
         balance_amount,
         created_at
       `)
-      .eq("created_by", userRes.user.id)
       .order("created_at", { ascending: false });
+
+    if (customerIdFilter) {
+      const customerIdNum = Number(customerIdFilter);
+      if (Number.isFinite(customerIdNum) && customerIdNum > 0) {
+        baseQuery = baseQuery.eq("customer_id", customerIdNum);
+      }
+    }
+
+    const { data: invoiceBase, error: baseErr } = await baseQuery;
 
     if (baseErr) {
       console.error("[GET /api/invoices] base invoices error", baseErr);
-      return jsonError(500, {
-        error: "Failed to load invoices",
-        supabaseError: safeError(baseErr),
-      });
+      console.error("[invoices/ts]", baseErr);
+      return jsonError(500, { error: "Failed to load invoices" });
     }
 
     const invoices = invoiceBase ?? [];
     const customerIds = Array.from(
       new Set(
         invoices
-          .map((r: any) => Number(r.customer_id))
-          .filter((v: any) => Number.isFinite(v) && v > 0)
+          .map((r: InvoiceListRow) => Number(r.customer_id))
+          .filter((v: number) => Number.isFinite(v) && v > 0)
       )
     );
 
@@ -597,21 +610,19 @@ export async function GET(req: Request) {
 
       if (custErr) {
         console.error("[GET /api/invoices] customers error", custErr);
-        return jsonError(500, {
-          error: "Failed to load customers",
-          supabaseError: safeError(custErr),
-        });
+        console.error("[invoices/ts]", custErr);
+      return jsonError(500, { error: "Failed to load customers" });
       }
 
       customerMap = new Map(
-        (customers ?? []).map((c: any) => [
+        (customers ?? []).map((c: { id: number; name: string | null }) => [
           Number(c.id),
           { id: Number(c.id), name: c.name ?? null },
         ])
       );
     }
 
-    const allRows = invoices.map((r: any) => {
+    const allRows = invoices.map((r: InvoiceListRow) => {
       const linkedCustomer = r.customer_id
         ? customerMap.get(Number(r.customer_id))
         : null;
@@ -635,6 +646,7 @@ export async function GET(req: Request) {
         vat_amount: r.vat_amount,
         total_amount: r.total_amount,
         paid_amount: r.paid_amount,
+        credited_amount: r.credited_amount ?? 0,
         balance_amount: r.balance_amount,
         created_at: r.created_at,
       };
@@ -644,7 +656,7 @@ export async function GET(req: Request) {
 
     if (q) {
       const needle = q.toLowerCase();
-      filtered = filtered.filter((r: any) => {
+      filtered = filtered.filter((r: InvoiceListRow) => {
         const invoiceNo = String(r.invoice_no ?? "").toLowerCase();
         const customerName = String(r.customer_name ?? "").toLowerCase();
         const siteAddress = String(r.site_address ?? "").toLowerCase();
@@ -659,7 +671,7 @@ export async function GET(req: Request) {
 
     if (rawStatus !== "ALL") {
       filtered = filtered.filter(
-        (r: any) => String(r.status ?? "").toUpperCase() === rawStatus
+        (r: InvoiceListRow) => String(r.status ?? "").toUpperCase() === rawStatus
       );
     }
 
@@ -678,11 +690,11 @@ export async function GET(req: Request) {
 
     const totalInvoices = filtered.length;
     const totalValue = filtered.reduce(
-      (s: number, r: any) => s + n2(r.total_amount),
+      (s: number, r: InvoiceListRow) => s + n2(r.total_amount),
       0
     );
 
-    const receivableVatInvoices = filtered.filter((r: any) => {
+    const receivableVatInvoices = filtered.filter((r: InvoiceListRow) => {
       const type = String(r.invoice_type ?? "").toUpperCase();
       const status = String(r.status ?? "").toUpperCase();
 
@@ -693,14 +705,14 @@ export async function GET(req: Request) {
     });
 
     const totalOutstanding = receivableVatInvoices.reduce(
-      (s: number, r: any) => s + n2(r.balance_amount),
+      (s: number, r: InvoiceListRow) => s + n2(r.balance_amount),
       0
     );
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const overdueCount = receivableVatInvoices.filter((r: any) => {
+    const overdueCount = receivableVatInvoices.filter((r: InvoiceListRow) => {
       const bal = n2(r.balance_amount);
       if (bal <= 0) return false;
 
@@ -737,8 +749,11 @@ export async function GET(req: Request) {
         byStatus,
       },
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
     console.error("[GET /api/invoices] fatal", e);
-    return jsonError(500, { error: e?.message ?? "Internal error" });
+    return jsonError(500, { error: "Internal error" });
   }
 }

@@ -2,16 +2,19 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { requirePermission } from "@/lib/authz";
 
 export const runtime = "nodejs";
 
-function n2(v: any) {
+function n2(v: unknown) {
   const x = Number(v ?? 0);
   return Number.isFinite(x) ? x : 0;
 }
 
 export async function GET() {
   try {
+    await requirePermission("dashboard.view");
+
     const cookieStore = await cookies();
 
     const supabase = createServerClient(
@@ -31,12 +34,6 @@ export async function GET() {
       }
     );
 
-    // Auth guard (returns JSON, not HTML redirect)
-    const { data: userRes, error: uErr } = await supabase.auth.getUser();
-    if (uErr || !userRes.user) {
-      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-    }
-
     // KPIs (simple + safe)
     // monthSales: sum of totals for ISSUED/PARTIALLY_PAID/PAID in current month
     // totalOutstanding: sum of balance_amount for ISSUED/PARTIALLY_PAID
@@ -47,11 +44,21 @@ export async function GET() {
 
     const { data: allInvoices, error: invErr } = await supabase
       .from("invoices")
-      .select("status,total_amount,balance_amount,invoice_date", { count: "exact" });
+      .select("status,total_amount,balance_amount,invoice_date,invoice_type", { count: "exact" });
 
     if (invErr) throw invErr;
 
-    const invoices = (allInvoices ?? []) as Array<any>;
+    type SummaryInvoiceRow = {
+      status: string | null;
+      total_amount: number | null;
+      balance_amount: number | null;
+      invoice_date: string | null;
+      invoice_type: string | null;
+    };
+
+    const invoices = ((allInvoices ?? []) as SummaryInvoiceRow[]).filter(
+      (i) => String(i.invoice_type ?? "").toUpperCase() !== "PRO_FORMA"
+    );
 
     const invoiceCount = invoices.length;
 
@@ -94,9 +101,14 @@ export async function GET() {
       },
       invoicesByStatus,
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    if (msg === "Forbidden") return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
+
+    console.error("[dashboard/summary]", e);
     return NextResponse.json(
-      { ok: false, error: e?.message || "Server error" },
+      { ok: false, error: "Failed to load dashboard summary" },
       { status: 500 }
     );
   }

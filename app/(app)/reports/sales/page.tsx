@@ -20,7 +20,9 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
+import { ReportFilterBar, type ReportFilterValue } from "@/components/reports/ReportFilterBar";
+import { resolveDateRange, bucketLabel } from "@/lib/reports/period";
 
 type InvoiceRow = {
   id: string;
@@ -57,12 +59,12 @@ type ApiCreditNoteList = {
   data?: CreditNoteRow[];
 };
 
-function n2(v: any) {
+function n2(v: unknown) {
   const x = Number(v ?? 0);
   return Number.isFinite(x) ? x : 0;
 }
 
-function money(v: any) {
+function money(v: unknown) {
   const n = n2(v);
   return `Rs ${n.toLocaleString("en-US", {
     minimumFractionDigits: 2,
@@ -232,17 +234,19 @@ function statusTone(st?: string | null) {
 }
 
 export default function Page() {
-  const today = React.useMemo(() => new Date(), []);
-  const yyyy = today.getFullYear();
-  const mm = String(today.getMonth() + 1).padStart(2, "0");
-  const monthEnd = String(new Date(yyyy, today.getMonth() + 1, 0).getDate()).padStart(2, "0");
-
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState("");
 
   const [q, setQ] = React.useState("");
-  const [from, setFrom] = React.useState(`${yyyy}-${mm}-01`);
-  const [to, setTo] = React.useState(`${yyyy}-${mm}-${monthEnd}`);
+  const initialRange = resolveDateRange("this_month");
+  const [filters, setFilters] = React.useState<ReportFilterValue>({
+    period: "this_month",
+    from: initialRange.from,
+    to: initialRange.to,
+    group: "month",
+  });
+  const from = filters.from;
+  const to = filters.to;
   const [status, setStatus] = React.useState("ALL");
 
   const [invoices, setInvoices] = React.useState<InvoiceRow[]>([]);
@@ -260,8 +264,8 @@ export default function Page() {
 
       setInvoices(Array.isArray(invRes.data) ? invRes.data : []);
       setCreditNotes(Array.isArray(cnRes.data) ? cnRes.data : []);
-    } catch (e: any) {
-      setErr(e?.message || "Failed to load sales report");
+    } catch (e: unknown) {
+      setErr(getErrorMessage(e, "Failed to load sales report"));
       setInvoices([]);
       setCreditNotes([]);
     } finally {
@@ -312,6 +316,24 @@ export default function Page() {
       customers,
     };
   }, [filteredInvoices, filteredCreditNotes]);
+
+  const groupedBreakdown = React.useMemo(() => {
+    const map = new Map<string, { period: string; total: number; paid: number; outstanding: number; docs: number }>();
+
+    filteredInvoices.forEach((r) => {
+      const dateStr = (r.invoice_date || r.created_at || "").slice(0, 10);
+      if (!dateStr) return;
+      const label = bucketLabel(dateStr, filters.group);
+      const prev = map.get(label) || { period: label, total: 0, paid: 0, outstanding: 0, docs: 0 };
+      prev.total += n2(r.total_amount);
+      prev.paid += n2(r.paid_amount);
+      prev.outstanding += n2(r.balance_amount);
+      prev.docs += 1;
+      map.set(label, prev);
+    });
+
+    return Array.from(map.values()).sort((a, b) => a.period.localeCompare(b.period));
+  }, [filteredInvoices, filters.group]);
 
   const topCustomers = React.useMemo(() => {
     const map = new Map<string, { customer: string; total: number; paid: number; balance: number; docs: number }>();
@@ -420,19 +442,19 @@ export default function Page() {
                 <RefreshCw className={cn("mr-2 size-4", loading && "animate-spin")} />
                 Refresh
               </Button>
-
-              <Button
-                className="rounded-2xl h-11 bg-[#071b38] text-white hover:bg-[#06142b] shadow-[0_16px_44px_rgba(7,27,56,0.18)]"
-                onClick={exportSalesCsv}
-                disabled={filteredInvoices.length === 0}
-              >
-                <Download className="mr-2 size-4" />
-                Export Sales CSV
-              </Button>
             </div>
           </div>
 
-          <div className="mt-5 grid grid-cols-1 gap-3 xl:grid-cols-[1fr_auto_auto_auto]">
+          <div className="mt-4">
+            <ReportFilterBar
+              value={filters}
+              onChange={setFilters}
+              onExportCsv={exportSalesCsv}
+              onPrint={() => window.print()}
+            />
+          </div>
+
+          <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-[1fr_auto]">
             <div className="relative">
               <Search className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
               <Input
@@ -440,28 +462,6 @@ export default function Page() {
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Search invoice no, customer, status..."
                 className="h-11 rounded-2xl pl-10"
-              />
-            </div>
-
-            <div className="flex items-center gap-2 rounded-2xl bg-white/70 ring-1 ring-slate-200 px-3 h-11">
-              <Calendar className="size-4 text-slate-400" />
-              <span className="text-xs font-semibold text-slate-600">From</span>
-              <input
-                type="date"
-                value={from}
-                onChange={(e) => setFrom(e.target.value)}
-                className="bg-transparent text-sm font-semibold text-slate-900 outline-none"
-              />
-            </div>
-
-            <div className="flex items-center gap-2 rounded-2xl bg-white/70 ring-1 ring-slate-200 px-3 h-11">
-              <Calendar className="size-4 text-slate-400" />
-              <span className="text-xs font-semibold text-slate-600">To</span>
-              <input
-                type="date"
-                value={to}
-                onChange={(e) => setTo(e.target.value)}
-                className="bg-transparent text-sm font-semibold text-slate-900 outline-none"
               />
             </div>
 
@@ -541,6 +541,48 @@ export default function Page() {
           sub={`${filteredCreditNotes.length} credit note(s) in period`}
         />
       </div>
+
+      <Card3D className="p-5">
+        <div className="text-sm font-semibold text-slate-900">
+          Breakdown by {filters.group === "day" ? "Day" : filters.group === "quarter" ? "Quarter" : filters.group === "year" ? "Year" : "Month"}
+        </div>
+        <div className="mt-1 text-xs text-slate-500">
+          Grouping controlled by the filter bar above.
+        </div>
+
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full min-w-[560px] text-sm">
+            <thead className="bg-slate-50 text-slate-600">
+              <tr className="[&>th]:px-3 [&>th]:py-2 [&>th]:text-left [&>th]:font-semibold">
+                <th>Period</th>
+                <th className="text-right">Invoices</th>
+                <th className="text-right">Billed</th>
+                <th className="text-right">Paid</th>
+                <th className="text-right">Outstanding</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {groupedBreakdown.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-3 py-6 text-center text-slate-500">
+                    No data for this period.
+                  </td>
+                </tr>
+              ) : (
+                groupedBreakdown.map((g) => (
+                  <tr key={g.period}>
+                    <td className="px-3 py-2 font-semibold text-slate-900">{g.period}</td>
+                    <td className="px-3 py-2 text-right text-slate-700">{g.docs}</td>
+                    <td className="px-3 py-2 text-right text-slate-700">{money(g.total)}</td>
+                    <td className="px-3 py-2 text-right text-blue-700">{money(g.paid)}</td>
+                    <td className="px-3 py-2 text-right text-slate-900">{money(g.outstanding)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card3D>
 
       <Card3D className="p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

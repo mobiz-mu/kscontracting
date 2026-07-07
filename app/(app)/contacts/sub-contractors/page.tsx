@@ -20,7 +20,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 
 type SubContractor = {
   id: number;
@@ -159,12 +159,12 @@ export default function SubContractorsPage() {
       const json: APIResponse = await res.json();
 
       if (!res.ok || !json?.ok) {
-        throw new Error((json as any)?.error ?? "Failed to load sub contractors");
+        throw new Error((json as { error?: string } | null)?.error ?? "Failed to load sub contractors");
       }
 
       setRows(json.data ?? []);
-    } catch (e: any) {
-      setError(e?.message || "Failed to load sub contractors");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to load sub contractors"));
       setRows([]);
     } finally {
       setLoading(false);

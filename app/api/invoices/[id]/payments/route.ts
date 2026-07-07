@@ -1,33 +1,25 @@
 import { NextResponse } from "next/server";
-import { createSupabaseServerClient, createSupabaseAdminClient } from "@/lib/supabase/server";
+import { requirePermission } from "@/lib/authz";
+import { createSupabaseAdminClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-function jsonError(status: number, payload: any) {
+function jsonError(status: number, payload: Record<string, unknown>) {
   return NextResponse.json({ ok: false, ...payload }, { status });
-}
-
-function safeError(err: any) {
-  return {
-    message: err?.message ?? "Unknown error",
-    code: err?.code ?? null,
-    details: err?.details ?? null,
-    hint: err?.hint ?? null,
-  };
 }
 
 function isUuid(v: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 }
 
-function n2(v: any) {
+function n2(v: unknown) {
   const x = Number(v ?? 0);
   return Number.isFinite(x) ? x : 0;
 }
 
-function normalizePaymentMethod(v: any) {
+function normalizePaymentMethod(v: unknown) {
   const s = String(v ?? "").trim().toUpperCase();
 
   if (s === "BANK_TRANSFER" || s === "BANK TRANSFER") return "BANK_TRANSFER";
@@ -64,138 +56,67 @@ export async function POST(req: Request, ctx: RouteContext) {
       return jsonError(400, { error: "payment_date is required" });
     }
 
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: userErr } = await supabase.auth.getUser();
-
-    if (userErr || !userRes.user) {
-      return jsonError(401, { error: "Unauthorized", supabaseError: safeError(userErr) });
-    }
+    const authz = await requirePermission("payments.create");
 
     const admin = createSupabaseAdminClient();
 
-    const { data: invoice, error: invErr } = await admin
-      .from("invoices")
-      .select(`
-        id,
-        invoice_no,
-        customer_id,
-        total_amount,
-        paid_amount,
-        balance_amount,
-        status,
-        created_by
-      `)
-      .eq("id", safeId)
-      .maybeSingle();
+    const { data: rpcResult, error: rpcErr } = await admin.rpc(
+      "record_invoice_payment",
+      {
+        p_invoice_id: safeId,
+        p_payment_date: paymentDate,
+        p_method: method,
+        p_reference_no: referenceNo,
+        p_amount: amount,
+        p_notes: notes,
+        p_created_by: authz.userId,
+      }
+    );
 
-    if (invErr) {
-      return jsonError(500, {
-        error: "Failed to load invoice",
-        supabaseError: safeError(invErr),
-      });
-    }
-
-    if (!invoice) {
-      return jsonError(404, { error: "Invoice not found" });
-    }
-
-    if (String(invoice.created_by) !== String(userRes.user.id)) {
-      return jsonError(403, { error: "Forbidden" });
-    }
-
-    const currentStatus = String(invoice.status ?? "").toUpperCase();
-
-    if (currentStatus === "VOID") {
-      return jsonError(400, { error: "Cannot add payment to a void invoice" });
-    }
-
-    const totalAmount = n2(invoice.total_amount);
-    const currentPaid = n2(invoice.paid_amount);
-    const currentBalance =
-      invoice.balance_amount == null
-        ? Math.max(0, totalAmount - currentPaid)
-        : n2(invoice.balance_amount);
-
-    if (currentBalance <= 0) {
-      return jsonError(400, { error: "Invoice is already fully paid" });
-    }
-
-    if (amount > currentBalance) {
-      return jsonError(400, {
-        error: `Payment amount cannot exceed balance amount (${currentBalance.toFixed(2)})`,
-      });
-    }
-
-    const { data: payment, error: paymentErr } = await admin
-      .from("payments")
-      .insert({
-        invoice_id: invoice.id,
-        customer_id: invoice.customer_id,
-        payment_date: paymentDate,
-        method,
-        reference_no: referenceNo,
-        amount,
-        notes,
-        created_by: userRes.user.id,
-      })
-      .select("*")
-      .maybeSingle();
-
-    if (paymentErr) {
-      return jsonError(500, {
-        error: "Failed to create payment",
-        supabaseError: safeError(paymentErr),
-      });
-    }
-
-    const newPaidAmount = currentPaid + amount;
-    const newBalanceAmount = Math.max(0, totalAmount - newPaidAmount);
-
-    let newStatus = "PARTIALLY_PAID";
-    if (newBalanceAmount <= 0) {
-      newStatus = "PAID";
-    } else if (newPaidAmount <= 0 && currentStatus === "DRAFT") {
-      newStatus = "DRAFT";
-    } else if (newPaidAmount <= 0) {
-      newStatus = "ISSUED";
-    }
-
-    const { data: updatedInvoice, error: updErr } = await admin
-      .from("invoices")
-      .update({
-        paid_amount: newPaidAmount,
-        balance_amount: newBalanceAmount,
-        status: newStatus,
-      })
-      .eq("id", invoice.id)
-      .eq("created_by", userRes.user.id)
-      .select(`
-        id,
-        invoice_no,
-        status,
-        total_amount,
-        paid_amount,
-        balance_amount
-      `)
-      .maybeSingle();
-
-    if (updErr) {
-      return jsonError(500, {
-        error: "Payment saved but failed to update invoice totals",
-        supabaseError: safeError(updErr),
-      });
+    if (rpcErr) {
+      const msg = String(rpcErr.message ?? "");
+      if (msg.includes("INVOICE_NOT_FOUND")) {
+        return jsonError(404, { error: "Invoice not found" });
+      }
+      if (msg.includes("INVOICE_VOID")) {
+        return jsonError(400, { error: "Cannot add payment to a void invoice" });
+      }
+      if (msg.includes("INVOICE_DRAFT")) {
+        return jsonError(400, {
+          error: "Cannot add a payment to a draft invoice. Issue it first.",
+        });
+      }
+      if (msg.includes("INVOICE_ALREADY_PAID")) {
+        return jsonError(400, { error: "Invoice is already fully paid" });
+      }
+      if (msg.includes("AMOUNT_EXCEEDS_BALANCE")) {
+        return jsonError(400, { error: "Payment amount cannot exceed the invoice balance" });
+      }
+      if (msg.includes("INVALID_AMOUNT")) {
+        return jsonError(400, { error: "Payment amount must be greater than 0" });
+      }
+      console.error("[invoices/[id]/payments]", rpcErr);
+      return jsonError(500, { error: "Failed to record payment" });
     }
 
     return NextResponse.json({
       ok: true,
       message: "Payment added successfully",
       data: {
-        payment,
-        invoice: updatedInvoice,
+        payment: rpcResult?.payment ?? null,
+        invoice: {
+          id: rpcResult?.invoice_id,
+          paid_amount: rpcResult?.paid_amount,
+          balance_amount: rpcResult?.balance_amount,
+          status: rpcResult?.status,
+        },
       },
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
     console.error("[POST /api/invoices/[id]/payments] fatal", e);
-    return jsonError(500, { error: e?.message ?? "Internal error" });
+    return jsonError(500, { error: "Internal error" });
   }
 }

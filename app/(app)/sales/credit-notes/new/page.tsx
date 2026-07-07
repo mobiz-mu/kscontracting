@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import * as React from "react";
 import Link from "next/link";
@@ -8,7 +8,6 @@ import {
   Save,
   Plus,
   Trash2,
-  FileText,
   Calendar,
   MapPin,
   Percent,
@@ -21,7 +20,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 
 type Customer = {
   id: string | number;
@@ -39,7 +38,7 @@ type Item = {
   price: string;
 };
 
-function n2(v: any) {
+function n2(v: unknown) {
   const x = Number(v ?? 0);
   return Number.isFinite(x) ? x : 0;
 }
@@ -260,8 +259,8 @@ export default function NewCreditNotePage() {
       }
 
       router.push(`/sales/credit-notes/${json.data.id}`);
-    } catch (e: any) {
-      setError(e?.message || "Failed to create credit note");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to create credit note"));
     } finally {
       setLoading(false);
     }
@@ -372,7 +371,7 @@ export default function NewCreditNotePage() {
                     <div className="px-4 py-3 text-sm text-slate-500">No customers found</div>
                   ) : (
                     filteredCustomers.map((c) => {
-                      const name = c.name ?? c.customer_name ?? "â€”";
+                      const name = c.name ?? c.customer_name ?? "—";
                       return (
                         <button
                           key={String(c.id)}

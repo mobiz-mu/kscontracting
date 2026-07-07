@@ -17,7 +17,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 
 type Supplier = {
   id: number;
@@ -132,8 +132,8 @@ export default function Page() {
       }
 
       setSuppliers(json.data || []);
-    } catch (e: any) {
-      alert(e.message || "Failed to load suppliers");
+    } catch (e: unknown) {
+      alert(getErrorMessage(e, "Failed to load suppliers"));
       setSuppliers([]);
     } finally {
       setLoading(false);

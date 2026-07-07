@@ -2,12 +2,16 @@
 
 import * as React from "react";
 import Image from "next/image";
-import { Quicksand } from "next/font/google";
 
-const quicksand = Quicksand({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-});
+// Previously used next/font/google (Quicksand), which requires a network
+// fetch to fonts.googleapis.com at build time and fails the whole build if
+// that's blocked (corporate proxies, offline CI, sandboxed environments,
+// etc). A print/PDF document component especially shouldn't have a hard
+// build-time dependency on an external network call. Using a solid system
+// font stack instead keeps the same clean, rounded, professional look
+// without that risk.
+const DOC_FONT_STACK =
+  '"Segoe UI", "Helvetica Neue", Arial, "Noto Sans", sans-serif';
 
 export type KSDocVariant = "invoice" | "credit_note" | "quotation";
 
@@ -59,6 +63,7 @@ export type KSInvoiceDocData = {
     vat?: number;
     total: number;
     paid: number;
+    credited?: number;
     balance: number;
   };
   notes?: string;
@@ -353,12 +358,20 @@ function FooterBlock({
   subtotal,
   vat,
   total,
+  paid,
+  credited,
+  balanceDue,
+  showPaymentBreakdown,
   variant,
 }: {
   company: KSInvoiceDocData["company"];
   subtotal: number;
   vat: number;
   total: number;
+  paid?: number;
+  credited?: number;
+  balanceDue?: number;
+  showPaymentBreakdown?: boolean;
   variant: KSDocVariant;
 }) {
 
@@ -420,6 +433,39 @@ function FooterBlock({
         {money(total)}
       </div>
     </div>
+
+    {showPaymentBreakdown ? (
+      <>
+        <div className="grid grid-cols-[1fr_29mm] border border-black border-t-0">
+          <div className="px-[2.1mm] py-[2mm] text-[4.2mm] font-semibold text-[#1a7a3c]">
+            PAID :
+          </div>
+          <div className="px-[2.1mm] py-[2mm] text-right text-[3.6mm] font-semibold text-[#1a7a3c]">
+            {money(paid ?? 0)}
+          </div>
+        </div>
+
+        {credited && credited > 0 ? (
+          <div className="grid grid-cols-[1fr_29mm] border border-black border-t-0">
+            <div className="px-[2.1mm] py-[2mm] text-[4.2mm] font-semibold text-[#1c5fa8]">
+              CREDITED :
+            </div>
+            <div className="px-[2.1mm] py-[2mm] text-right text-[3.6mm] font-semibold text-[#1c5fa8]">
+              {money(credited)}
+            </div>
+          </div>
+        ) : null}
+
+        <div className="grid grid-cols-[1fr_29mm] border border-black border-t-0">
+          <div className="px-[2.1mm] py-[2.3mm] text-[4.6mm] font-bold">
+            BALANCE DUE :
+          </div>
+          <div className="px-[2.1mm] py-[2.3mm] text-right text-[3.8mm] font-bold">
+            {money(balanceDue ?? 0)}
+          </div>
+        </div>
+      </>
+    ) : null}
   </div>
 </div>
 
@@ -474,6 +520,10 @@ export default function InvoiceKSDoc({
   const subtotal = n2(data.totals.subtotal);
   const vat = n2(data.totals.vat);
   const total = n2(data.totals.total);
+  const paid = n2(data.totals.paid);
+  const credited = n2(data.totals.credited);
+  const balanceDue = n2(data.totals.balance);
+  const showPaymentBreakdown = paid > 0 || credited > 0;
 
   const issueDate = fmtDate(data.invoice.issueDate || "");
 
@@ -511,7 +561,7 @@ export default function InvoiceKSDoc({
         }
 
         .ks-doc-root {
-          font-family: ${quicksand.style.fontFamily}, Arial, Helvetica, sans-serif;
+          font-family: ${DOC_FONT_STACK};
           color: #000000;
           background: #ffffff;
         }
@@ -559,7 +609,7 @@ export default function InvoiceKSDoc({
       `}</style>
 
       <div
-        className={`ks-doc-root ${quicksand.className} mx-auto w-[196mm] max-w-[196mm] bg-white text-black`}
+        className={`ks-doc-root mx-auto w-[196mm] max-w-[196mm] bg-white text-black`}
       >
         <div className="ks-doc-page">
           <div className="px-[1.5mm] pt-[0.8mm]">
@@ -587,6 +637,10 @@ export default function InvoiceKSDoc({
                 subtotal={subtotal}
                 vat={vat}
                 total={total}
+                paid={paid}
+                credited={credited}
+                balanceDue={balanceDue}
+                showPaymentBreakdown={showPaymentBreakdown}
                 variant={currentVariant}
             />
           </div>

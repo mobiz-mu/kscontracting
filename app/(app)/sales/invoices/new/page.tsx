@@ -1,4 +1,4 @@
-﻿
+
 "use client";
 
 import * as React from "react";
@@ -31,7 +31,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 
 /* =========================================
    Types
@@ -102,23 +102,21 @@ type ApiItem = {
 type InvoiceGetResponse = {
   ok: boolean;
   data?: { invoice?: ApiInvoice; items?: ApiItem[] };
-  error?: any;
-  supabaseError?: any;
-  details?: any;
+  error?: string;
 };
 
 /* =========================================
    Helpers
 ========================================= */
 
-function n2(v: any) {
+function n2(v: unknown) {
   const s = String(v ?? "").trim();
   if (!s) return 0;
   const x = Number(s);
   return Number.isFinite(x) ? x : 0;
 }
 
-function qtyForCalc(v: any) {
+function qtyForCalc(v: unknown) {
   const s = String(v ?? "").trim();
   if (!s) return 1;
   const x = Number(s);
@@ -167,13 +165,13 @@ async function safeGet<T>(url: string): Promise<T> {
   return JSON.parse(text) as T;
 }
 
-function normalizeInvoiceType(v: any): InvoiceType {
+function normalizeInvoiceType(v: unknown): InvoiceType {
   const raw = String(v ?? "").trim().toUpperCase();
   if (raw === "PRO_FORMA" || raw === "PROFORMA") return "PRO_FORMA";
   return "VAT_INVOICE";
 }
 
-function isDraftStatus(v: any) {
+function isDraftStatus(v: unknown) {
   return String(v ?? "").trim().toUpperCase() === "DRAFT";
 }
 
@@ -512,13 +510,7 @@ export default function NewInvoicePage() {
     const j = ct.includes("application/json") ? JSON.parse(text) : null;
 
     if (!res.ok || !j?.ok) {
-      throw new Error(
-        j?.supabaseError?.message ??
-          j?.supabaseError?.details ??
-          j?.error?.message ??
-          j?.error ??
-          `Save failed (HTTP ${res.status})`
-      );
+      throw new Error(j?.error ?? `Save failed (HTTP ${res.status})`);
     }
 
     const inv = j.data?.invoice;
@@ -542,8 +534,8 @@ export default function NewInvoicePage() {
       await saveToServer("DRAFT");
       setToast(isEditMode ? "Draft updated successfully." : "Draft saved successfully.");
       window.setTimeout(() => setToast(null), 2200);
-    } catch (e: any) {
-      setErr(e?.message || "Failed to save draft");
+    } catch (e: unknown) {
+      setErr(getErrorMessage(e, "Failed to save draft"));
     } finally {
       setSaving(false);
     }
@@ -579,8 +571,8 @@ export default function NewInvoicePage() {
         "noopener,noreferrer"
       );
       window.location.href = `/sales/invoices/${encodeURIComponent(id)}`;
-    } catch (e: any) {
-      setErr(e?.message || "Failed to issue invoice");
+    } catch (e: unknown) {
+      setErr(getErrorMessage(e, "Failed to issue invoice"));
     } finally {
       setIssuing(false);
     }
@@ -593,7 +585,7 @@ export default function NewInvoicePage() {
 
     (async () => {
       try {
-        const j = await safeGet<{ ok: boolean; data?: any }>("/api/settings/company");
+        const j = await safeGet<{ ok: boolean; data?: Record<string, unknown> }>("/api/settings/company");
         const s = j?.data ?? {};
 
         const isProForma = invoiceType === "PRO_FORMA";
@@ -623,7 +615,7 @@ export default function NewInvoicePage() {
     (async () => {
       setCustLoading(true);
       try {
-        const j = await safeGet<{ ok: boolean; data?: any[] }>("/api/customers");
+        const j = await safeGet<{ ok: boolean; data?: Array<{ id: number; name?: string | null }> }>("/api/customers");
         const list = (j?.data ?? []) as Customer[];
         if (!alive) return;
         setCustomers(list);
@@ -717,9 +709,9 @@ export default function NewInvoicePage() {
         if (statusKey !== "DRAFT") {
           setErr("Only draft invoices can be edited.");
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (!alive) return;
-        setErr(e?.message || "Failed to load draft invoice for editing.");
+        setErr(getErrorMessage(e, "Failed to load draft invoice for editing."));
       } finally {
         if (alive) setLoadingExisting(false);
       }
@@ -780,6 +772,7 @@ export default function NewInvoicePage() {
 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onIssue/onSaveDraft are recreated each render and read the same state already listed here; adding them would just churn the listener on every render
   }, [rows, customerId, invoiceNo, invoiceDate, invoiceType, invoiceId, editLocked]);
 
   function onRowKeyDown(
@@ -1416,13 +1409,13 @@ You can also add phases, materials, quotation reference, and special notes here.
 
                       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                         <div>
-                          <div className="text-xs text-slate-500">Client's VAT Reg. No.</div>
+                          <div className="text-xs text-slate-500">Client&apos;s VAT Reg. No.</div>
                           <div className="font-semibold text-slate-900">
                             {customerVat || "—"}
                           </div>
                         </div>
                         <div>
-                          <div className="text-xs text-slate-500">Client's BRN No.</div>
+                          <div className="text-xs text-slate-500">Client&apos;s BRN No.</div>
                           <div className="font-semibold text-slate-900">
                             {customerBrn || "—"}
                           </div>

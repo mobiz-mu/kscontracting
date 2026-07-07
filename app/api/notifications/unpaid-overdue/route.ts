@@ -1,25 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requirePermission } from "@/lib/authz";
 import {
-  createSupabaseServerClient,
   createSupabaseAdminClient,
 } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
-function jsonError(status: number, payload: any) {
+function jsonError(status: number, payload: Record<string, unknown>) {
   return NextResponse.json({ ok: false, ...payload }, { status });
 }
 
-function safeError(err: any) {
-  return {
-    message: err?.message ?? "Unknown error",
-    code: err?.code ?? null,
-    details: err?.details ?? null,
-    hint: err?.hint ?? null,
-  };
-}
-
-function n2(v: any) {
+function n2(v: unknown) {
   const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
 }
@@ -32,15 +23,7 @@ function parseDateOnly(value?: string | null) {
 
 export async function GET(req: NextRequest) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: userErr } = await supabase.auth.getUser();
-
-    if (userErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(userErr),
-      });
-    }
+    await requirePermission("dashboard.view");
 
     const admin = createSupabaseAdminClient();
     const days = Math.max(1, Number(req.nextUrl.searchParams.get("days") ?? 30) || 30);
@@ -59,22 +42,19 @@ export async function GET(req: NextRequest) {
         balance_amount,
         created_by
       `)
-      .eq("created_by", userRes.user.id)
       .in("status", ["ISSUED", "PARTIALLY_PAID"])
       .gt("balance_amount", 0)
       .order("due_date", { ascending: true });
 
     if (error) {
-      return jsonError(500, {
-        error: "Failed to load overdue invoices",
-        supabaseError: safeError(error),
-      });
+      console.error("[notifications/unpaid-overdue]", error);
+      return jsonError(500, { error: "Failed to load overdue invoices" });
     }
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const overdue = (data ?? []).filter((row: any) => {
+    const overdue = (data ?? []).filter((row) => {
       const due = parseDateOnly(row.due_date);
       if (!due) return false;
 
@@ -92,9 +72,10 @@ export async function GET(req: NextRequest) {
         days,
       },
     });
-  } catch (e: any) {
-    return jsonError(500, {
-      error: e?.message ?? "Internal error",
-    });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
+    return jsonError(500, { error: "Internal error" });
   }
 }

@@ -1,27 +1,13 @@
 import { NextResponse } from "next/server";
+import { requirePermission } from "@/lib/authz";
 import {
-  createSupabaseServerClient,
   createSupabaseAdminClient,
 } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
-function jsonError(status: number, payload: any) {
+function jsonError(status: number, payload: Record<string, unknown>) {
   return NextResponse.json({ ok: false, ...payload }, { status });
-}
-
-function safeError(err: any) {
-  return {
-    message: err?.message ?? "Unknown error",
-    code: err?.code ?? null,
-    details: err?.details ?? null,
-    hint: err?.hint ?? null,
-  };
-}
-
-function n2(v: any) {
-  const n = Number(v ?? 0);
-  return Number.isFinite(n) ? n : 0;
 }
 
 type Ctx = {
@@ -32,15 +18,7 @@ export async function GET(_: Request, ctx: Ctx) {
   try {
     const { id } = await ctx.params;
 
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: uErr } = await supabase.auth.getUser();
-
-    if (uErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(uErr),
-      });
-    }
+    await requirePermission("purchase_bills.view");
 
     const supabaseAdmin = createSupabaseAdminClient();
 
@@ -68,18 +46,17 @@ export async function GET(_: Request, ctx: Ctx) {
       .single();
 
     if (error || !data) {
-      return jsonError(404, {
-        error: "Sub contractor payment not found",
-        supabaseError: safeError(error),
-      });
+      console.error("[sub-contractor-payments/[id]]", error);
+      return jsonError(404, { error: "Sub contractor payment not found" });
     }
 
     return NextResponse.json({ ok: true, data });
-  } catch (e: any) {
-    return jsonError(500, {
-      error: "Internal error",
-      supabaseError: safeError(e),
-    });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
+    console.error("[sub-contractor-payments/[id]]", e);
+      return jsonError(500, { error: "Internal error" });
   }
 }
 
@@ -87,35 +64,30 @@ export async function DELETE(_: Request, ctx: Ctx) {
   try {
     const { id } = await ctx.params;
 
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: uErr } = await supabase.auth.getUser();
-
-    if (uErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(uErr),
-      });
-    }
+    await requirePermission("purchase_bills.delete");
 
     const supabaseAdmin = createSupabaseAdminClient();
 
-    const { error } = await supabaseAdmin
-      .from("sub_contractor_payments")
-      .delete()
-      .eq("id", id);
+    const { data: rpcResult, error: rpcErr } = await supabaseAdmin.rpc(
+      "delete_sub_contractor_payment",
+      { p_payment_id: Number(id) }
+    );
 
-    if (error) {
-      return jsonError(500, {
-        error: "Failed to delete payment",
-        supabaseError: safeError(error),
-      });
+    if (rpcErr) {
+      const msg = String(rpcErr.message ?? "");
+      if (msg.includes("PAYMENT_NOT_FOUND")) {
+        return jsonError(404, { error: "Payment not found" });
+      }
+      console.error("[sub-contractor-payments/[id]]", rpcErr);
+      return jsonError(500, { error: "Failed to delete payment" });
     }
 
-    return NextResponse.json({ ok: true });
-  } catch (e: any) {
-    return jsonError(500, {
-      error: "Internal error",
-      supabaseError: safeError(e),
-    });
+    return NextResponse.json({ ok: true, data: rpcResult });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
+    console.error("[sub-contractor-payments/[id]]", e);
+    return jsonError(500, { error: "Internal error" });
   }
 }

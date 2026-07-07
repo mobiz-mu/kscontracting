@@ -7,6 +7,7 @@ import { ArrowLeft, Plus, Trash2, Save } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { getErrorMessage } from "@/lib/utils";
 
 type SubContractor = {
   id: number;
@@ -20,7 +21,7 @@ type Item = {
   vat_rate: string;
 };
 
-function n2(v: any) {
+function n2(v: unknown) {
   const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
 }
@@ -35,7 +36,7 @@ function money(v: number) {
 export default function EditPurchaseBillPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
-  const id = String((params as any)?.id ?? "").trim();
+  const id = String((params as Record<string, unknown> | null)?.id ?? "").trim();
 
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
@@ -79,7 +80,7 @@ export default function EditPurchaseBillPage() {
         setNotes(bill.notes ?? "");
         setPaidAmount(String(bill.paid_amount ?? 0));
         setItems(
-          (bill.items ?? []).map((item: any) => ({
+          (bill.items ?? []).map((item: { description?: string; qty?: number; unit_price?: number; vat_rate?: number }) => ({
             description: item.description ?? "",
             qty: String(item.qty ?? 1),
             unit_price: String(item.unit_price ?? 0),
@@ -90,8 +91,8 @@ export default function EditPurchaseBillPage() {
         if (subRes.ok && subJson?.ok) {
           setSubContractors(subJson.data ?? []);
         }
-      } catch (e: any) {
-        alert(e?.message || "Failed to load purchase bill");
+      } catch (e: unknown) {
+        alert(getErrorMessage(e, "Failed to load purchase bill"));
       } finally {
         setLoading(false);
       }
@@ -183,8 +184,8 @@ export default function EditPurchaseBillPage() {
       }
 
       router.push(`/purchase-bills/${id}`);
-    } catch (e: any) {
-      alert(e?.message || "Failed to update purchase bill");
+    } catch (e: unknown) {
+      alert(getErrorMessage(e, "Failed to update purchase bill"));
     } finally {
       setSaving(false);
     }
@@ -281,7 +282,8 @@ export default function EditPurchaseBillPage() {
           </div>
 
           <div className="overflow-hidden rounded-xl border">
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-sm">
               <thead className="bg-slate-50">
                 <tr>
                   <th className="p-3 text-left">Description</th>
@@ -341,6 +343,7 @@ export default function EditPurchaseBillPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
 

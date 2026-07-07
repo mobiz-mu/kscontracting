@@ -39,6 +39,12 @@ type CreditNoteApi = {
   customer_vat?: string | null;
   customer_brn?: string | null;
   customer_address?: string | null;
+  // Legacy/alternate field names some older records may still use.
+  client_name?: string | null;
+  client_address?: string | null;
+  client_brn?: string | null;
+  client_vat?: string | null;
+  customer_vat_no?: string | null;
   site_address?: string | null;
   credit_note_date?: string | null;
   subtotal?: number | null;
@@ -48,13 +54,13 @@ type CreditNoteApi = {
   items?: CreditNoteItemApi[];
 };
 
-function n2(v: any) {
+function n2(v: unknown) {
   const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
 }
 
 function getParamId(params: unknown): string {
-  const p = params as any;
+  const p = params as Record<string, unknown> | null;
   const raw = p?.id;
   if (Array.isArray(raw)) return String(raw[0] ?? "").trim();
   return String(raw ?? "").trim();
@@ -132,14 +138,14 @@ export default function CreditNotePrintPage() {
       const j = await safeGet<{
         ok: boolean;
         data: CreditNoteApi;
-        error?: any;
+        error?: string;
       }>(`/api/credit-notes/${encodeURIComponent(id)}`);
 
       if (!j.ok) throw new Error(j?.error ?? "Credit note not found");
       setCreditNote(j.data ?? null);
       if (!j.data) setError("Credit note not found.");
-    } catch (e: any) {
-      setError(e?.message || "Failed to load credit note");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load credit note");
       setCreditNote(null);
     } finally {
       setLoading(false);
@@ -313,45 +319,45 @@ export default function CreditNotePrintPage() {
      billTo: {
   name:
     creditNote.customer_name ||
-    (creditNote as any).client_name ||
+    creditNote.client_name ||
     "",
   address:
     creditNote.customer_address ||
-    (creditNote as any).client_address ||
+    creditNote.client_address ||
     creditNote.site_address ||
     "",
   brn:
     creditNote.customer_brn ||
-    (creditNote as any).client_brn ||
+    creditNote.client_brn ||
     "",
   vat:
     creditNote.customer_vat ||
-    (creditNote as any).customer_vat_no ||
-    (creditNote as any).client_vat ||
+    creditNote.customer_vat_no ||
+    creditNote.client_vat ||
     "",
   siteAddress: creditNote.site_address || "",
   lines: [
     creditNote.customer_name
       ? `Name: ${creditNote.customer_name}`
-      : (creditNote as any).client_name
-      ? `Name: ${(creditNote as any).client_name}`
+      : creditNote.client_name
+      ? `Name: ${creditNote.client_name}`
       : "",
     creditNote.customer_address
       ? `Address: ${creditNote.customer_address}`
-      : (creditNote as any).client_address
-      ? `Address: ${(creditNote as any).client_address}`
+      : creditNote.client_address
+      ? `Address: ${creditNote.client_address}`
       : "",
     creditNote.customer_brn
       ? `BRN No.: ${creditNote.customer_brn}`
-      : (creditNote as any).client_brn
-      ? `BRN No.: ${(creditNote as any).client_brn}`
+      : creditNote.client_brn
+      ? `BRN No.: ${creditNote.client_brn}`
       : "",
     creditNote.customer_vat
       ? `VAT No.: ${creditNote.customer_vat}`
-      : (creditNote as any).customer_vat_no
-      ? `VAT No.: ${(creditNote as any).customer_vat_no}`
-      : (creditNote as any).client_vat
-      ? `VAT No.: ${(creditNote as any).client_vat}`
+      : creditNote.customer_vat_no
+      ? `VAT No.: ${creditNote.customer_vat_no}`
+      : creditNote.client_vat
+      ? `VAT No.: ${creditNote.client_vat}`
       : "",
     creditNote.site_address ? `Site Address: ${creditNote.site_address}` : "",
   ].filter(Boolean),

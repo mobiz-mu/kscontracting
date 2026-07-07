@@ -7,17 +7,8 @@ type RouteContext = {
   params: Promise<{ token: string }>;
 };
 
-function jsonError(status: number, payload: any) {
+function jsonError(status: number, payload: Record<string, unknown>) {
   return NextResponse.json({ ok: false, ...payload }, { status });
-}
-
-function safeError(err: any) {
-  return {
-    message: err?.message ?? "Unknown error",
-    code: err?.code ?? null,
-    details: err?.details ?? null,
-    hint: err?.hint ?? null,
-  };
 }
 
 export async function GET(_req: Request, ctx: RouteContext) {
@@ -33,19 +24,21 @@ export async function GET(_req: Request, ctx: RouteContext) {
 
     const { data: share, error: shareErr } = await admin
       .from("invoice_share_tokens")
-      .select("token, invoice_id, expires_at")
+      .select("token, invoice_id, expires_at, revoked_at")
       .eq("token", safeToken)
       .maybeSingle();
 
     if (shareErr) {
-      return jsonError(500, {
-        error: "Failed to load share token",
-        supabaseError: safeError(shareErr),
-      });
+      console.error("[public/invoice/share-lookup]", shareErr);
+      return jsonError(500, { error: "Failed to load share token" });
     }
 
     if (!share) {
       return jsonError(404, { error: "Share link not found" });
+    }
+
+    if (share.revoked_at) {
+      return jsonError(404, { error: "This share link has been revoked" });
     }
 
     if (share.expires_at && new Date(share.expires_at).getTime() < Date.now()) {
@@ -67,6 +60,7 @@ export async function GET(_req: Request, ctx: RouteContext) {
         vat_amount,
         total_amount,
         paid_amount,
+        credited_amount,
         balance_amount,
         customer_id,
         customer_name,
@@ -78,10 +72,8 @@ export async function GET(_req: Request, ctx: RouteContext) {
       .maybeSingle();
 
     if (invErr) {
-      return jsonError(500, {
-        error: "Failed to load invoice",
-        supabaseError: safeError(invErr),
-      });
+      console.error("[public/invoice/invoice-lookup]", invErr);
+      return jsonError(500, { error: "Failed to load invoice" });
     }
 
     if (!invoice) {
@@ -104,10 +96,8 @@ export async function GET(_req: Request, ctx: RouteContext) {
       .order("id", { ascending: true });
 
     if (itemsErr) {
-      return jsonError(500, {
-        error: "Failed to load invoice items",
-        supabaseError: safeError(itemsErr),
-      });
+      console.error("[public/invoice/items-lookup]", itemsErr);
+      return jsonError(500, { error: "Failed to load invoice items" });
     }
 
     return NextResponse.json({
@@ -121,9 +111,8 @@ export async function GET(_req: Request, ctx: RouteContext) {
         },
       },
     });
-  } catch (e: any) {
-    return jsonError(500, {
-      error: e?.message ?? "Internal error",
-    });
+  } catch (e: unknown) {
+    console.error("[public/invoice/fatal]", e);
+    return jsonError(500, { error: "Internal error" });
   }
 }

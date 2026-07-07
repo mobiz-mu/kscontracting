@@ -6,14 +6,13 @@ import {
   Shield,
   RefreshCw,
   Save,
-  CheckCircle2,
   Mail,
   Calendar,
   BadgeCheck,
   UserCog,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 
 type RoleRow = {
   id: number;
@@ -39,7 +38,7 @@ type UsersApiResponse = {
     users: UserRow[];
     roles: RoleRow[];
   };
-  error?: any;
+  error?: string;
 };
 
 function fmtDate(v?: string | null) {
@@ -94,7 +93,7 @@ async function safeGet<T>(url: string): Promise<T> {
   return JSON.parse(raw) as T;
 }
 
-async function safePost<T>(url: string, body: any): Promise<T> {
+async function safePost<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -147,8 +146,8 @@ export default function Page() {
         nextDrafts[user.id] = (user.roles ?? []).map((r) => r.role_id);
       }
       setDraftRoles(nextDrafts);
-    } catch (e: any) {
-      setError(e?.message || "Failed to load users");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to load users"));
       setUsers([]);
       setRoles([]);
       setDraftRoles({});
@@ -186,8 +185,8 @@ export default function Page() {
       });
 
       await load();
-    } catch (e: any) {
-      setError(e?.message || "Failed to save user roles");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to save user roles"));
     } finally {
       setSavingUserId(null);
     }

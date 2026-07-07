@@ -1,22 +1,13 @@
 import { NextResponse } from "next/server";
+import { requirePermission } from "@/lib/authz";
 import {
-  createSupabaseServerClient,
   createSupabaseAdminClient,
 } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
-function jsonError(status: number, payload: any) {
+function jsonError(status: number, payload: Record<string, unknown>) {
   return NextResponse.json({ ok: false, ...payload }, { status });
-}
-
-function safeError(err: any) {
-  return {
-    message: err?.message ?? "Unknown error",
-    code: err?.code ?? null,
-    details: err?.details ?? null,
-    hint: err?.hint ?? null,
-  };
 }
 
 function parseSubContractorId(value: string) {
@@ -38,15 +29,7 @@ export async function GET(_: Request, ctx: Ctx) {
       return jsonError(400, { error: "Invalid sub contractor id" });
     }
 
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: uErr } = await supabase.auth.getUser();
-
-    if (uErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(uErr),
-      });
-    }
+    await requirePermission("contacts.view");
 
     const supabaseAdmin = createSupabaseAdminClient();
 
@@ -59,10 +42,8 @@ export async function GET(_: Request, ctx: Ctx) {
       .maybeSingle();
 
     if (error) {
-      return jsonError(500, {
-        error: "Failed to load sub contractor",
-        supabaseError: safeError(error),
-      });
+      console.error("[sub-contractors/[id]]", error);
+      return jsonError(500, { error: "Failed to load sub contractor" });
     }
 
     if (!data) {
@@ -72,11 +53,12 @@ export async function GET(_: Request, ctx: Ctx) {
     }
 
     return NextResponse.json({ ok: true, data });
-  } catch (e: any) {
-    return jsonError(500, {
-      error: "Internal error",
-      supabaseError: safeError(e),
-    });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
+    console.error("[sub-contractors/[id]]", e);
+      return jsonError(500, { error: "Internal error" });
   }
 }
 
@@ -89,15 +71,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
       return jsonError(400, { error: "Invalid sub contractor id" });
     }
 
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: uErr } = await supabase.auth.getUser();
-
-    if (uErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(uErr),
-      });
-    }
+    await requirePermission("contacts.manage");
 
     const supabaseAdmin = createSupabaseAdminClient();
     const body = await req.json().catch(() => ({}));
@@ -132,10 +106,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
       .maybeSingle();
 
     if (error) {
-      return jsonError(500, {
-        error: "Failed to update sub contractor",
-        supabaseError: safeError(error),
-      });
+      console.error("[sub-contractors/[id]]", error);
+      return jsonError(500, { error: "Failed to update sub contractor" });
     }
 
     if (!data) {
@@ -145,11 +117,12 @@ export async function PATCH(req: Request, ctx: Ctx) {
     }
 
     return NextResponse.json({ ok: true, data });
-  } catch (e: any) {
-    return jsonError(500, {
-      error: "Internal error",
-      supabaseError: safeError(e),
-    });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
+    console.error("[sub-contractors/[id]]", e);
+      return jsonError(500, { error: "Internal error" });
   }
 }
 
@@ -162,15 +135,7 @@ export async function DELETE(_: Request, ctx: Ctx) {
       return jsonError(400, { error: "Invalid sub contractor id" });
     }
 
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: uErr } = await supabase.auth.getUser();
-
-    if (uErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(uErr),
-      });
-    }
+    await requirePermission("contacts.manage");
 
     const supabaseAdmin = createSupabaseAdminClient();
 
@@ -181,10 +146,8 @@ export async function DELETE(_: Request, ctx: Ctx) {
       .maybeSingle();
 
     if (existingErr) {
-      return jsonError(500, {
-        error: "Failed to load sub contractor",
-        supabaseError: safeError(existingErr),
-      });
+      console.error("[sub-contractors/[id]]", existingErr);
+      return jsonError(500, { error: "Failed to load sub contractor" });
     }
 
     if (!existing) {
@@ -199,17 +162,16 @@ export async function DELETE(_: Request, ctx: Ctx) {
       .eq("id", subContractorId);
 
     if (error) {
-      return jsonError(500, {
-        error: "Failed to delete sub contractor",
-        supabaseError: safeError(error),
-      });
+      console.error("[sub-contractors/[id]]", error);
+      return jsonError(500, { error: "Failed to delete sub contractor" });
     }
 
     return NextResponse.json({ ok: true });
-  } catch (e: any) {
-    return jsonError(500, {
-      error: "Internal error",
-      supabaseError: safeError(e),
-    });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
+    console.error("[sub-contractors/[id]]", e);
+      return jsonError(500, { error: "Internal error" });
   }
 }

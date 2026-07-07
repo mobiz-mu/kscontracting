@@ -1,24 +1,13 @@
 import { NextResponse } from "next/server";
-import {
-  createSupabaseServerClient,
-  createSupabaseAdminClient,
-} from "@/lib/supabase/server";
+import { requirePermission } from "@/lib/authz";
+import { createSupabaseAdminClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-function jsonError(status: number, payload: any) {
+function jsonError(status: number, payload: Record<string, unknown>) {
   return NextResponse.json({ ok: false, ...payload }, { status });
-}
-
-function safeError(err: any) {
-  return {
-    message: err?.message ?? "Unknown error",
-    code: err?.code ?? null,
-    details: err?.details ?? null,
-    hint: err?.hint ?? null,
-  };
 }
 
 function isUuid(v: string) {
@@ -27,7 +16,7 @@ function isUuid(v: string) {
   );
 }
 
-function isDraftStatus(v: any) {
+function isDraftStatus(v: unknown) {
   return String(v ?? "").trim().toUpperCase() === "DRAFT";
 }
 
@@ -39,15 +28,7 @@ export async function GET(_req: Request, ctx: RouteContext) {
   if (!isUuid(safeId)) return jsonError(400, { error: "Invalid invoice id" });
 
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: uErr } = await supabase.auth.getUser();
-
-    if (uErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(uErr),
-      });
-    }
+    await requirePermission("invoices.view");
 
     const admin = createSupabaseAdminClient();
 
@@ -65,6 +46,7 @@ export async function GET(_req: Request, ctx: RouteContext) {
         vat_amount,
         total_amount,
         paid_amount,
+        credited_amount,
         balance_amount,
         created_at,
         issued_at,
@@ -76,21 +58,18 @@ export async function GET(_req: Request, ctx: RouteContext) {
         customer_address
       `)
       .eq("id", safeId)
-      .eq("created_by", userRes.user.id)
       .maybeSingle();
 
     if (invErr) {
-      return jsonError(500, {
-        error: "Failed to load invoice",
-        supabaseError: safeError(invErr),
-      });
+      console.error("[invoices/id/ts]", invErr);
+      return jsonError(500, { error: "Failed to load invoice" });
     }
 
     if (!invoice) {
       return jsonError(404, { error: "Invoice not found" });
     }
 
-    let customer: any = null;
+    let customer: { id: number; name: string | null; brn: string | null; vat_no: string | null; address: string | null } | null = null;
 
     if (invoice.customer_id != null) {
       const { data: cust, error: custErr } = await admin
@@ -100,10 +79,8 @@ export async function GET(_req: Request, ctx: RouteContext) {
         .maybeSingle();
 
       if (custErr) {
-        return jsonError(500, {
-          error: "Failed to load customer",
-          supabaseError: safeError(custErr),
-        });
+        console.error("[invoices/id/ts]", custErr);
+      return jsonError(500, { error: "Failed to load customer" });
       }
 
       customer = cust ?? null;
@@ -118,10 +95,8 @@ export async function GET(_req: Request, ctx: RouteContext) {
       .order("id", { ascending: true });
 
     if (itemsErr) {
-      return jsonError(500, {
-        error: "Failed to load invoice items",
-        supabaseError: safeError(itemsErr),
-      });
+      console.error("[invoices/id/ts]", itemsErr);
+      return jsonError(500, { error: "Failed to load invoice items" });
     }
 
     const statusKey = String(invoice.status ?? "").toUpperCase();
@@ -144,24 +119,25 @@ export async function GET(_req: Request, ctx: RouteContext) {
             vat_amount: invoice.vat_amount ?? 0,
             total_amount: invoice.total_amount ?? 0,
             paid_amount: invoice.paid_amount ?? 0,
+            credited_amount: invoice.credited_amount ?? 0,
             balance_amount: invoice.balance_amount ?? 0,
             created_at: invoice.created_at,
             issued_at: invoice.issued_at,
             customer_id: invoice.customer_id,
             created_by: invoice.created_by,
 
-            customer_name: (invoice as any).customer_name ?? customer?.name ?? null,
+            customer_name: invoice.customer_name ?? customer?.name ?? null,
             customer_address:
-              (invoice as any).customer_address ?? customer?.address ?? null,
-            customer_brn: (invoice as any).customer_brn ?? customer?.brn ?? null,
-            customer_vat: (invoice as any).customer_vat ?? customer?.vat_no ?? null,
+              invoice.customer_address ?? customer?.address ?? null,
+            customer_brn: invoice.customer_brn ?? customer?.brn ?? null,
+            customer_vat: invoice.customer_vat ?? customer?.vat_no ?? null,
 
             can_edit_draft: canEditDraft,
             can_issue: canIssue,
 
             customers: customer,
           },
-          items: (items ?? []).map((item: any) => ({
+          items: (items ?? []).map((item) => ({
             id: item.id,
             invoice_id: item.invoice_id,
             description: item.description ?? "",
@@ -179,9 +155,7 @@ export async function GET(_req: Request, ctx: RouteContext) {
       { status: 200 }
     );
   } catch (err) {
-    return jsonError(500, {
-      error: "Unexpected server error",
-      supabaseError: safeError(err),
-    });
+    console.error("[invoices/id/ts]", err);
+      return jsonError(500, { error: "Unexpected server error" });
   }
 }

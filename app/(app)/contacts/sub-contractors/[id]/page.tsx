@@ -24,7 +24,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 
 type SubContractor = {
   id: string | number;
@@ -41,7 +41,7 @@ type SubContractor = {
   updated_at?: string | null;
 };
 
-type ApiResp = { ok: boolean; data?: SubContractor; error?: any };
+type ApiResp = { ok: boolean; data?: SubContractor; error?: string };
 
 function Surface({
   children,
@@ -109,29 +109,6 @@ function InfoRow({
   );
 }
 
-async function safeGet<T>(url: string): Promise<T> {
-  const res = await fetch(url, { cache: "no-store" });
-  const ct = res.headers.get("content-type") || "";
-  const raw = await res.text();
-
-  if (!res.ok) {
-    try {
-      const j = JSON.parse(raw);
-      throw new Error(
-        j?.error?.message ?? j?.error ?? j?.message ?? `HTTP ${res.status}`
-      );
-    } catch {
-      throw new Error(`HTTP ${res.status}: ${raw.slice(0, 200)}`);
-    }
-  }
-
-  if (!ct.includes("application/json")) {
-    throw new Error(`Expected JSON but got ${ct || "unknown"}`);
-  }
-
-  return JSON.parse(raw) as T;
-}
-
 async function safeMutation<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     method: "PATCH",
@@ -163,7 +140,7 @@ async function safeMutation<T>(url: string, init?: RequestInit): Promise<T> {
 export default function SubContractorDetailsPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
-  const id = String((params as any)?.id ?? "").trim();
+  const id = String((params as Record<string, unknown> | null)?.id ?? "").trim();
 
   const [row, setRow] = React.useState<SubContractor | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -217,8 +194,8 @@ export default function SubContractorDetailsPage() {
       const loaded = json.data ?? null;
       setRow(loaded);
       if (loaded) fillForm(loaded);
-    } catch (e: any) {
-      setError(e?.message || "Failed to load sub contractor");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to load sub contractor"));
       setRow(null);
     } finally {
       setLoading(false);
@@ -227,6 +204,7 @@ export default function SubContractorDetailsPage() {
 
   React.useEffect(() => {
     if (id) void load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: load on mount/param change only
   }, [id]);
 
   function updateField<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
@@ -300,8 +278,8 @@ export default function SubContractorDetailsPage() {
       setEditing(false);
       setSuccess("Sub contractor updated successfully.");
       router.refresh();
-    } catch (e: any) {
-      setError(e?.message || "Failed to update sub contractor");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to update sub contractor"));
     } finally {
       setSaving(false);
     }
@@ -327,8 +305,8 @@ export default function SubContractorDetailsPage() {
       }
 
       router.push("/contacts/sub-contractors");
-    } catch (e: any) {
-      alert(e?.message || "Failed to delete sub contractor");
+    } catch (e: unknown) {
+      alert(getErrorMessage(e, "Failed to delete sub contractor"));
     } finally {
       setDeleting(false);
     }

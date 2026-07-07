@@ -7,7 +7,6 @@ import {
   FileText,
   RefreshCw,
   Search,
-  ArrowUpRight,
   AlertTriangle,
   BadgeCheck,
   CircleDollarSign,
@@ -21,7 +20,9 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
+import { ReportFilterBar, type ReportFilterValue } from "@/components/reports/ReportFilterBar";
+import { resolveDateRange, bucketLabel } from "@/lib/reports/period";
 
 /* =========================================
    Types
@@ -81,12 +82,12 @@ type ApiCreditNoteList = {
    Helpers
 ========================================= */
 
-function n2(v: any) {
+function n2(v: unknown) {
   const x = Number(v ?? 0);
   return Number.isFinite(x) ? x : 0;
 }
 
-function money(v: any) {
+function money(v: unknown) {
   const n = n2(v);
   return `Rs ${n.toLocaleString("en-US", {
     minimumFractionDigits: 2,
@@ -105,7 +106,7 @@ function fmtDate(v?: string | null) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function pct(v: any) {
+function pct(v: unknown) {
   const x = n2(v);
   return `${Math.round(x * 10000) / 100}%`;
 }
@@ -269,17 +270,19 @@ function KPICard({
 ========================================= */
 
 export default function VatReportPage() {
-  const today = React.useMemo(() => new Date(), []);
-  const yyyy = today.getFullYear();
-  const mm = String(today.getMonth() + 1).padStart(2, "0");
-  const monthEnd = String(new Date(yyyy, today.getMonth() + 1, 0).getDate()).padStart(2, "0");
-
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState("");
 
   const [q, setQ] = React.useState("");
-  const [from, setFrom] = React.useState(`${yyyy}-${mm}-01`);
-  const [to, setTo] = React.useState(`${yyyy}-${mm}-${monthEnd}`);
+  const initialRange = resolveDateRange("this_month");
+  const [filters, setFilters] = React.useState<ReportFilterValue>({
+    period: "this_month",
+    from: initialRange.from,
+    to: initialRange.to,
+    group: "month",
+  });
+  const from = filters.from;
+  const to = filters.to;
   const [docType, setDocType] = React.useState<"ALL" | "INVOICE" | "CREDIT_NOTE">("ALL");
   const [status, setStatus] = React.useState("ALL");
 
@@ -298,8 +301,8 @@ export default function VatReportPage() {
 
       setInvoiceRows(Array.isArray(invRes.data) ? invRes.data : []);
       setCreditNoteRows(Array.isArray(cnRes.data) ? cnRes.data : []);
-    } catch (e: any) {
-      setErr(e?.message || "Failed to load VAT report");
+    } catch (e: unknown) {
+      setErr(getErrorMessage(e, "Failed to load VAT report"));
       setInvoiceRows([]);
       setCreditNoteRows([]);
     } finally {
@@ -357,6 +360,24 @@ export default function VatReportPage() {
       return okQuery && okDate && okType && okStatus;
     });
   }, [rows, q, from, to, docType, status]);
+
+  const groupedVat = React.useMemo(() => {
+    const map = new Map<string, { period: string; taxable: number; vat: number; total: number; docs: number }>();
+
+    filtered.forEach((r) => {
+      const dateStr = String(r.doc_date ?? "").slice(0, 10);
+      if (!dateStr) return;
+      const label = bucketLabel(dateStr, filters.group);
+      const prev = map.get(label) || { period: label, taxable: 0, vat: 0, total: 0, docs: 0 };
+      prev.taxable += n2(r.taxable_amount);
+      prev.vat += n2(r.vat_amount);
+      prev.total += n2(r.total_amount);
+      prev.docs += 1;
+      map.set(label, prev);
+    });
+
+    return Array.from(map.values()).sort((a, b) => a.period.localeCompare(b.period));
+  }, [filtered, filters.group]);
 
   const totals = React.useMemo(() => {
     const taxable = filtered.reduce((s, r) => s + n2(r.taxable_amount), 0);
@@ -467,20 +488,20 @@ export default function VatReportPage() {
                 <RefreshCw className={cn("mr-2 size-4", loading && "animate-spin")} />
                 Refresh
               </Button>
-
-              <Button
-                className="rounded-2xl h-11 bg-[#071b38] text-white hover:bg-[#06142b] shadow-[0_16px_44px_rgba(7,27,56,0.18)]"
-                onClick={exportCurrentCsv}
-                disabled={filtered.length === 0}
-              >
-                <Download className="mr-2 size-4" />
-                Export VAT CSV
-              </Button>
             </div>
           </div>
 
+          <div className="mt-4">
+            <ReportFilterBar
+              value={filters}
+              onChange={setFilters}
+              onExportCsv={exportCurrentCsv}
+              onPrint={() => window.print()}
+            />
+          </div>
+
           {/* Filters */}
-          <div className="mt-5 grid grid-cols-1 gap-3 xl:grid-cols-[1fr_auto_auto_auto_auto]">
+          <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-[1fr_auto]">
             <div className="relative">
               <Search className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
               <Input
@@ -488,28 +509,6 @@ export default function VatReportPage() {
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Search doc no, customer, status..."
                 className="h-11 rounded-2xl pl-10"
-              />
-            </div>
-
-            <div className="flex items-center gap-2 rounded-2xl bg-white/70 ring-1 ring-slate-200 px-3 h-11">
-              <Calendar className="size-4 text-slate-400" />
-              <span className="text-xs font-semibold text-slate-600">From</span>
-              <input
-                type="date"
-                value={from}
-                onChange={(e) => setFrom(e.target.value)}
-                className="bg-transparent text-sm font-semibold text-slate-900 outline-none"
-              />
-            </div>
-
-            <div className="flex items-center gap-2 rounded-2xl bg-white/70 ring-1 ring-slate-200 px-3 h-11">
-              <Calendar className="size-4 text-slate-400" />
-              <span className="text-xs font-semibold text-slate-600">To</span>
-              <input
-                type="date"
-                value={to}
-                onChange={(e) => setTo(e.target.value)}
-                className="bg-transparent text-sm font-semibold text-slate-900 outline-none"
               />
             </div>
 
@@ -582,6 +581,49 @@ export default function VatReportPage() {
           tone="slate"
         />
       </div>
+
+      {/* Grouped breakdown */}
+      <Card3D className="p-5">
+        <div className="text-sm font-semibold text-slate-900">
+          VAT by {filters.group === "day" ? "Day" : filters.group === "quarter" ? "Quarter" : filters.group === "year" ? "Year" : "Month"}
+        </div>
+        <div className="mt-1 text-xs text-slate-500">
+          Grouping controlled by the filter bar above.
+        </div>
+
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full min-w-[560px] text-sm">
+            <thead className="bg-slate-50 text-slate-600">
+              <tr className="[&>th]:px-3 [&>th]:py-2 [&>th]:text-left [&>th]:font-semibold">
+                <th>Period</th>
+                <th className="text-right">Documents</th>
+                <th className="text-right">Taxable</th>
+                <th className="text-right">VAT</th>
+                <th className="text-right">Total</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {groupedVat.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-3 py-6 text-center text-slate-500">
+                    No data for this period.
+                  </td>
+                </tr>
+              ) : (
+                groupedVat.map((g) => (
+                  <tr key={g.period}>
+                    <td className="px-3 py-2 font-semibold text-slate-900">{g.period}</td>
+                    <td className="px-3 py-2 text-right text-slate-700">{g.docs}</td>
+                    <td className="px-3 py-2 text-right text-slate-700">{money(g.taxable)}</td>
+                    <td className="px-3 py-2 text-right text-blue-700">{money(g.vat)}</td>
+                    <td className="px-3 py-2 text-right text-slate-900">{money(g.total)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card3D>
 
       {/* Summary by customer */}
       <Card3D className="p-5">

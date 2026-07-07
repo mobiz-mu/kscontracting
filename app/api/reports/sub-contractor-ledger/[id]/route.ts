@@ -1,22 +1,13 @@
 import { NextResponse } from "next/server";
+import { requirePermission } from "@/lib/authz";
 import {
-  createSupabaseServerClient,
   createSupabaseAdminClient,
 } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
-function jsonError(status: number, payload: any) {
+function jsonError(status: number, payload: Record<string, unknown>) {
   return NextResponse.json({ ok: false, ...payload }, { status });
-}
-
-function safeError(err: any) {
-  return {
-    message: err?.message ?? "Unknown error",
-    code: err?.code ?? null,
-    details: err?.details ?? null,
-    hint: err?.hint ?? null,
-  };
 }
 
 type Ctx = {
@@ -27,15 +18,7 @@ export async function GET(_: Request, ctx: Ctx) {
   try {
     const { id } = await ctx.params;
 
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: uErr } = await supabase.auth.getUser();
-
-    if (uErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(uErr),
-      });
-    }
+    await requirePermission("reports.view");
 
     const supabaseAdmin = createSupabaseAdminClient();
 
@@ -46,10 +29,8 @@ export async function GET(_: Request, ctx: Ctx) {
       .single();
 
     if (subError || !sub) {
-      return jsonError(404, {
-        error: "Sub contractor not found",
-        supabaseError: safeError(subError),
-      });
+      console.error("[reports/sub-contractor-ledger/[id]]", subError);
+      return jsonError(404, { error: "Sub contractor not found" });
     }
 
     const { data: bills, error: billsError } = await supabaseAdmin
@@ -69,10 +50,8 @@ export async function GET(_: Request, ctx: Ctx) {
       .order("id", { ascending: true });
 
     if (billsError) {
-      return jsonError(500, {
-        error: "Failed to load purchase bills",
-        supabaseError: safeError(billsError),
-      });
+      console.error("[reports/sub-contractor-ledger/[id]]", billsError);
+      return jsonError(500, { error: "Failed to load purchase bills" });
     }
 
     const { data: payments, error: paymentsError } = await supabaseAdmin
@@ -92,14 +71,12 @@ export async function GET(_: Request, ctx: Ctx) {
       .order("id", { ascending: true });
 
     if (paymentsError) {
-      return jsonError(500, {
-        error: "Failed to load payments",
-        supabaseError: safeError(paymentsError),
-      });
+      console.error("[reports/sub-contractor-ledger/[id]]", paymentsError);
+      return jsonError(500, { error: "Failed to load payments" });
     }
 
     const ledger = [
-      ...(bills ?? []).map((b: any) => ({
+      ...(bills ?? []).map((b) => ({
         type: "BILL",
         date: b.bill_date,
         ref_no: b.bill_no,
@@ -108,7 +85,7 @@ export async function GET(_: Request, ctx: Ctx) {
         credit: 0,
         purchase_bill_id: b.id,
       })),
-      ...(payments ?? []).map((p: any) => ({
+      ...(payments ?? []).map((p) => ({
         type: "PAYMENT",
         date: p.payment_date,
         ref_no: p.payment_no,
@@ -145,10 +122,11 @@ export async function GET(_: Request, ctx: Ctx) {
         ledger: ledgerWithBalance,
       },
     });
-  } catch (e: any) {
-    return jsonError(500, {
-      error: "Internal error",
-      supabaseError: safeError(e),
-    });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
+    console.error("[reports/sub-contractor-ledger/[id]]", e);
+      return jsonError(500, { error: "Internal error" });
   }
 }

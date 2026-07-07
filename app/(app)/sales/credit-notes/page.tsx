@@ -16,7 +16,6 @@ import {
   CircleDollarSign,
   AlertTriangle,
   BadgeCheck,
-  MoreHorizontal,
   Download,
   Printer,
   MessageCircle,
@@ -29,7 +28,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 
 import {
   DropdownMenu,
@@ -72,20 +71,19 @@ type CreditNotesResponse = {
     total: number;
     hasMore: boolean;
   };
-  error?: any;
-  supabaseError?: any;
+  error?: string;
 };
 
 /* =========================================
    Helpers
 ========================================= */
 
-function n2(v: any) {
+function n2(v: unknown) {
   const x = Number(v ?? 0);
   return Number.isFinite(x) ? x : 0;
 }
 
-function money(v: any) {
+function money(v: unknown) {
   const n = n2(v);
   return `Rs ${n.toLocaleString("en-MU", {
     minimumFractionDigits: 2,
@@ -110,7 +108,7 @@ function fmtDate(v?: string | null) {
   return `${dd}/${mm}/${yyyy}`;
 }
 
-function safeId(id: any) {
+function safeId(id: unknown) {
   const s = String(id ?? "").trim();
   if (!s || s === "undefined" || s === "null") return "";
   return s;
@@ -311,7 +309,7 @@ export default function CreditNotesPage() {
   const pageSize = 25;
 
   const [refreshTick, setRefreshTick] = React.useState(0);
-  const [busyActionId, setBusyActionId] = React.useState<string>("");
+  const [busyActionId] = React.useState<string>("");
 
   async function load(p = page) {
     setLoading(true);
@@ -324,12 +322,12 @@ export default function CreditNotesPage() {
       params.set("pageSize", String(pageSize));
 
       const res = await safeGet<CreditNotesResponse>(`/api/credit-notes?${params.toString()}`);
-      if (!res.ok) throw new Error(res?.error?.message ?? res?.error ?? "Failed to load credit notes");
+      if (!res.ok) throw new Error(res?.error ?? "Failed to load credit notes");
 
       setRows(Array.isArray(res.data) ? res.data : []);
       setMeta(res.meta ?? null);
-    } catch (e: any) {
-      setErr(e?.message || "Failed to load credit notes");
+    } catch (e: unknown) {
+      setErr(getErrorMessage(e, "Failed to load credit notes"));
       setRows([]);
       setMeta(null);
     } finally {

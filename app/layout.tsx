@@ -10,7 +10,7 @@ export const metadata: Metadata = {
   },
   description:
     "Professional accounting, invoicing and reporting platform for KS CONTRACTING LTD.",
-  metadataBase: new URL("http://localhost:3000"),
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"),
   openGraph: {
     title: "KS Accounting System",
     description:

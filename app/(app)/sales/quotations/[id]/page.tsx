@@ -1,13 +1,11 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
   CheckCircle2,
   FileText,
-  Loader2,
   Calendar,
   Building2,
   ArrowUpRight,
@@ -26,7 +24,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 
 type QuoteItem = {
   id: number | string;
@@ -59,12 +57,12 @@ type Quote = {
   items?: QuoteItem[];
 };
 
-function n2(v: any) {
+function n2(v: unknown) {
   const x = Number(v ?? 0);
   return Number.isFinite(x) ? x : 0;
 }
 
-function money(v: any) {
+function money(v: unknown) {
   const n = n2(v);
   return `Rs ${n.toLocaleString("en-MU", {
     minimumFractionDigits: 2,
@@ -264,8 +262,8 @@ export default function QuotationDetailsPage() {
 
       setQuote((json.data ?? null) as Quote);
       setLastSync(new Date());
-    } catch (e: any) {
-      setError(e?.message || "Failed to load quotation");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to load quotation"));
       setQuote(null);
     } finally {
       setLoading(false);
@@ -275,6 +273,7 @@ export default function QuotationDetailsPage() {
   React.useEffect(() => {
     if (!id) return;
     void load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: load on mount/param change only
   }, [id]);
 
   async function acceptQuote() {
@@ -299,8 +298,8 @@ export default function QuotationDetailsPage() {
       }
 
       await load();
-    } catch (e: any) {
-      setError(e?.message || "Failed to accept quotation");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to accept quotation"));
     } finally {
       setAccepting(false);
     }
@@ -331,8 +330,8 @@ export default function QuotationDetailsPage() {
       }
 
       await load();
-    } catch (e: any) {
-      setError(e?.message || "Failed to void quotation");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to void quotation"));
     } finally {
       setVoiding(false);
     }

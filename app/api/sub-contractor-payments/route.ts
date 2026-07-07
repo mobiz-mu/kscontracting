@@ -1,40 +1,23 @@
 import { NextResponse } from "next/server";
+import { requirePermission } from "@/lib/authz";
 import {
-  createSupabaseServerClient,
   createSupabaseAdminClient,
 } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
-function jsonError(status: number, payload: any) {
+function jsonError(status: number, payload: Record<string, unknown>) {
   return NextResponse.json({ ok: false, ...payload }, { status });
 }
 
-function safeError(err: any) {
-  return {
-    message: err?.message ?? "Unknown error",
-    code: err?.code ?? null,
-    details: err?.details ?? null,
-    hint: err?.hint ?? null,
-  };
-}
-
-function n2(v: any) {
+function n2(v: unknown) {
   const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
 }
 
 export async function GET(req: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: uErr } = await supabase.auth.getUser();
-
-    if (uErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(uErr),
-      });
-    }
+    await requirePermission("purchase_bills.view");
 
     const url = new URL(req.url);
     const q = (url.searchParams.get("q") ?? "").trim();
@@ -76,35 +59,26 @@ export async function GET(req: Request) {
     const { data, error } = await query;
 
     if (error) {
-      return jsonError(500, {
-        error: "Failed to load sub contractor payments",
-        supabaseError: safeError(error),
-      });
+      console.error("[sub-contractor-payments]", error);
+      return jsonError(500, { error: "Failed to load sub contractor payments" });
     }
 
     return NextResponse.json({
       ok: true,
       data: data ?? [],
     });
-  } catch (e: any) {
-    return jsonError(500, {
-      error: "Internal error",
-      supabaseError: safeError(e),
-    });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
+    console.error("[sub-contractor-payments]", e);
+      return jsonError(500, { error: "Internal error" });
   }
 }
 
 export async function POST(req: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: uErr } = await supabase.auth.getUser();
-
-    if (uErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(uErr),
-      });
-    }
+    await requirePermission("purchase_bills.create");
 
     const supabaseAdmin = createSupabaseAdminClient();
     const body = await req.json().catch(() => ({}));
@@ -132,60 +106,54 @@ export async function POST(req: Request) {
       return jsonError(400, { error: "amount must be greater than zero" });
     }
 
-    if (purchaseBillId) {
-      const { data: bill, error: billError } = await supabaseAdmin
-        .from("purchase_bills")
-        .select("id, sub_contractor_id, balance_amount")
-        .eq("id", purchaseBillId)
-        .single();
+    const { data: rpcResult, error: rpcErr } = await supabaseAdmin.rpc(
+      "record_sub_contractor_payment",
+      {
+        p_sub_contractor_id: subContractorId,
+        p_purchase_bill_id: purchaseBillId,
+        p_payment_no: paymentNo,
+        p_payment_date: paymentDate,
+        p_payment_method: paymentMethod,
+        p_reference_no: referenceNo,
+        p_amount: amount,
+        p_notes: notes,
+      }
+    );
 
-      if (billError || !bill) {
+    if (rpcErr) {
+      const msg = String(rpcErr.message ?? "");
+      if (msg.includes("BILL_NOT_FOUND")) {
+        return jsonError(400, { error: "Selected purchase bill not found" });
+      }
+      if (msg.includes("BILL_VOID")) {
+        return jsonError(400, { error: "Cannot add a payment to a void purchase bill" });
+      }
+      if (msg.includes("BILL_DRAFT")) {
         return jsonError(400, {
-          error: "Selected purchase bill not found",
-          supabaseError: safeError(billError),
+          error: "Cannot add a payment to a draft purchase bill. Update its status first.",
         });
       }
-
-      if (Number(bill.sub_contractor_id) !== subContractorId) {
+      if (msg.includes("BILL_CONTRACTOR_MISMATCH")) {
         return jsonError(400, {
           error: "Selected purchase bill does not belong to this sub contractor",
         });
       }
-
-      if (amount > Number(bill.balance_amount ?? 0)) {
-        return jsonError(400, {
-          error: "Payment amount exceeds the bill outstanding balance",
-        });
+      if (msg.includes("AMOUNT_EXCEEDS_BALANCE")) {
+        return jsonError(400, { error: "Payment amount exceeds the bill outstanding balance" });
       }
+      if (msg.includes("INVALID_AMOUNT")) {
+        return jsonError(400, { error: "amount must be greater than zero" });
+      }
+      console.error("[sub-contractor-payments]", rpcErr);
+      return jsonError(500, { error: "Failed to create sub contractor payment" });
     }
 
-    const { data, error } = await supabaseAdmin
-      .from("sub_contractor_payments")
-      .insert({
-        payment_no: paymentNo,
-        sub_contractor_id: subContractorId,
-        purchase_bill_id: purchaseBillId,
-        payment_date: paymentDate,
-        payment_method: paymentMethod,
-        reference_no: referenceNo,
-        amount,
-        notes,
-      })
-      .select("*")
-      .single();
-
-    if (error) {
-      return jsonError(500, {
-        error: "Failed to create sub contractor payment",
-        supabaseError: safeError(error),
-      });
-    }
-
-    return NextResponse.json({ ok: true, data }, { status: 201 });
-  } catch (e: any) {
-    return jsonError(500, {
-      error: "Internal error",
-      supabaseError: safeError(e),
-    });
+    return NextResponse.json({ ok: true, data: rpcResult?.payment ?? null }, { status: 201 });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
+    console.error("[sub-contractor-payments]", e);
+    return jsonError(500, { error: "Internal error" });
   }
 }

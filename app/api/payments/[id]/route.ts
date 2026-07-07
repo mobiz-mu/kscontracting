@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
+import { requirePermission } from "@/lib/authz";
 import {
-  createSupabaseServerClient,
   createSupabaseAdminClient,
 } from "@/lib/supabase/server";
 
@@ -8,17 +8,8 @@ export const runtime = "nodejs";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-function jsonError(status: number, payload: any) {
+function jsonError(status: number, payload: Record<string, unknown>) {
   return NextResponse.json({ ok: false, ...payload }, { status });
-}
-
-function safeError(err: any) {
-  return {
-    message: err?.message ?? "Unknown error",
-    code: err?.code ?? null,
-    details: err?.details ?? null,
-    hint: err?.hint ?? null,
-  };
 }
 
 export async function GET(_req: Request, ctx: RouteContext) {
@@ -30,15 +21,7 @@ export async function GET(_req: Request, ctx: RouteContext) {
       return jsonError(400, { error: "Missing payment id" });
     }
 
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: userErr } = await supabase.auth.getUser();
-
-    if (userErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(userErr),
-      });
-    }
+    await requirePermission("payments.view");
 
     const admin = createSupabaseAdminClient();
 
@@ -60,18 +43,12 @@ export async function GET(_req: Request, ctx: RouteContext) {
       .maybeSingle();
 
     if (paymentErr) {
-      return jsonError(500, {
-        error: "Failed to load payment",
-        supabaseError: safeError(paymentErr),
-      });
+      console.error("[payments/[id]]", paymentErr);
+      return jsonError(500, { error: "Failed to load payment" });
     }
 
     if (!payment) {
       return jsonError(404, { error: "Payment not found" });
-    }
-
-    if (String(payment.created_by) !== String(userRes.user.id)) {
-      return jsonError(403, { error: "Forbidden" });
     }
 
     const [{ data: invoice }, { data: customer }] = await Promise.all([
@@ -106,8 +83,11 @@ export async function GET(_req: Request, ctx: RouteContext) {
         created_at: payment.created_at,
       },
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
     console.error("[GET /api/payments/[id]] fatal", e);
-    return jsonError(500, { error: e?.message ?? "Internal error" });
+    return jsonError(500, { error: "Internal error" });
   }
 }

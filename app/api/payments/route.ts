@@ -1,30 +1,21 @@
 import { NextResponse } from "next/server";
+import { requirePermission } from "@/lib/authz";
 import {
-  createSupabaseServerClient,
   createSupabaseAdminClient,
 } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
-function jsonError(status: number, payload: any) {
+function jsonError(status: number, payload: Record<string, unknown>) {
   return NextResponse.json({ ok: false, ...payload }, { status });
 }
 
-function safeError(err: any) {
-  return {
-    message: err?.message ?? "Unknown error",
-    code: err?.code ?? null,
-    details: err?.details ?? null,
-    hint: err?.hint ?? null,
-  };
-}
-
-function n2(v: any) {
+function n2(v: unknown) {
   const x = Number(v ?? 0);
   return Number.isFinite(x) ? x : 0;
 }
 
-function normalizeMethod(v: any) {
+function normalizeMethod(v: unknown) {
   const raw = String(v ?? "").trim().toUpperCase();
   if (raw === "CASH") return "CASH";
   if (raw === "CHEQUE") return "CHEQUE";
@@ -34,15 +25,7 @@ function normalizeMethod(v: any) {
 
 export async function POST(req: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: userErr } = await supabase.auth.getUser();
-
-    if (userErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(userErr),
-      });
-    }
+    const authz = await requirePermission("payments.create");
 
     const body = await req.json().catch(() => ({}));
     const admin = createSupabaseAdminClient();
@@ -76,6 +59,7 @@ export async function POST(req: Request) {
         customer_id,
         customer_name,
         site_address,
+        status,
         total_amount,
         paid_amount,
         balance_amount,
@@ -85,18 +69,22 @@ export async function POST(req: Request) {
       .maybeSingle();
 
     if (invoiceErr) {
-      return jsonError(500, {
-        error: "Failed to load invoice",
-        supabaseError: safeError(invoiceErr),
-      });
+      console.error("[payments]", invoiceErr);
+      return jsonError(500, { error: "Failed to load invoice" });
     }
 
     if (!invoice) {
       return jsonError(404, { error: "Invoice not found" });
     }
 
-    if (String(invoice.created_by) !== String(userRes.user.id)) {
-      return jsonError(403, { error: "Forbidden" });
+    const invoiceStatus = String(invoice.status ?? "").toUpperCase();
+    if (invoiceStatus === "VOID") {
+      return jsonError(400, { error: "Cannot add a payment to a void invoice" });
+    }
+    if (invoiceStatus === "DRAFT") {
+      return jsonError(400, {
+        error: "Cannot add a payment to a draft invoice. Issue it first.",
+      });
     }
 
     if (!invoice.customer_id) {
@@ -105,44 +93,46 @@ export async function POST(req: Request) {
       });
     }
 
-    const currentBalance = n2(invoice.balance_amount);
-    if (amount > currentBalance && currentBalance > 0) {
-      return jsonError(400, {
-        error: `Payment amount exceeds invoice balance (${currentBalance.toFixed(2)})`,
-      });
+    const { data: rpcResult, error: rpcErr } = await admin.rpc(
+      "record_invoice_payment",
+      {
+        p_invoice_id: invoice_id,
+        p_payment_date: payment_date,
+        p_method: method,
+        p_reference_no: reference_no,
+        p_amount: amount,
+        p_notes: notes,
+        p_created_by: authz.userId,
+      }
+    );
+
+    if (rpcErr) {
+      const msg = String(rpcErr.message ?? "");
+      if (msg.includes("INVOICE_NOT_FOUND")) {
+        return jsonError(404, { error: "Invoice not found" });
+      }
+      if (msg.includes("INVOICE_VOID")) {
+        return jsonError(400, { error: "Cannot add a payment to a void invoice" });
+      }
+      if (msg.includes("INVOICE_DRAFT")) {
+        return jsonError(400, {
+          error: "Cannot add a payment to a draft invoice. Issue it first.",
+        });
+      }
+      if (msg.includes("INVOICE_ALREADY_PAID")) {
+        return jsonError(400, { error: "Invoice is already fully paid" });
+      }
+      if (msg.includes("AMOUNT_EXCEEDS_BALANCE")) {
+        return jsonError(400, { error: "Payment amount exceeds invoice balance" });
+      }
+      if (msg.includes("INVALID_AMOUNT")) {
+        return jsonError(400, { error: "amount must be greater than 0" });
+      }
+      console.error("[payments]", rpcErr);
+      return jsonError(500, { error: "Failed to record payment" });
     }
 
-    const { data: payment, error: payErr } = await admin
-      .from("payments")
-      .insert({
-        invoice_id,
-        customer_id: invoice.customer_id,
-        payment_date,
-        method,
-        reference_no,
-        amount,
-        notes,
-        created_by: userRes.user.id,
-      })
-      .select(`
-        id,
-        invoice_id,
-        customer_id,
-        payment_date,
-        method,
-        reference_no,
-        amount,
-        notes,
-        created_at
-      `)
-      .single();
-
-    if (payErr) {
-      return jsonError(500, {
-        error: "Failed to create payment",
-        supabaseError: safeError(payErr),
-      });
-    }
+    const payment = rpcResult?.payment ?? {};
 
     return NextResponse.json({
       ok: true,
@@ -153,23 +143,18 @@ export async function POST(req: Request) {
         site_address: invoice.site_address ?? null,
       },
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
     console.error("[POST /api/payments] fatal", e);
-    return jsonError(500, { error: e?.message ?? "Internal error" });
+    return jsonError(500, { error: "Internal error" });
   }
 }
 
 export async function GET(req: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: userErr } = await supabase.auth.getUser();
-
-    if (userErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(userErr),
-      });
-    }
+    await requirePermission("payments.view");
 
     const admin = createSupabaseAdminClient();
     const url = new URL(req.url);
@@ -199,23 +184,32 @@ export async function GET(req: Request) {
         created_at,
         created_by
       `)
-      .eq("created_by", userRes.user.id)
       .order("payment_date", { ascending: false })
       .order("created_at", { ascending: false });
 
     if (paymentErr) {
-      return jsonError(500, {
-        error: "Failed to load payments",
-        supabaseError: safeError(paymentErr),
-      });
+      console.error("[payments]", paymentErr);
+      return jsonError(500, { error: "Failed to load payments" });
     }
 
-    const payments = paymentBase ?? [];
+    type PaymentBaseRow = {
+      id: string;
+      invoice_id: string | null;
+      customer_id: number | null;
+      payment_date: string | null;
+      method: string | null;
+      reference_no: string | null;
+      amount: number | null;
+      notes: string | null;
+      created_at: string | null;
+    };
+
+    const payments = (paymentBase ?? []) as PaymentBaseRow[];
 
     const invoiceIds = Array.from(
       new Set(
         payments
-          .map((r: any) => String(r.invoice_id ?? "").trim())
+          .map((r) => String(r.invoice_id ?? "").trim())
           .filter(Boolean)
       )
     );
@@ -223,8 +217,8 @@ export async function GET(req: Request) {
     const customerIds = Array.from(
       new Set(
         payments
-          .map((r: any) => Number(r.customer_id))
-          .filter((v: any) => Number.isFinite(v) && v > 0)
+          .map((r) => Number(r.customer_id))
+          .filter((v) => Number.isFinite(v) && v > 0)
       )
     );
 
@@ -242,14 +236,12 @@ export async function GET(req: Request) {
         .in("id", invoiceIds);
 
       if (invErr) {
-        return jsonError(500, {
-          error: "Failed to load payment invoices",
-          supabaseError: safeError(invErr),
-        });
+        console.error("[payments]", invErr);
+      return jsonError(500, { error: "Failed to load payment invoices" });
       }
 
       invoiceMap = new Map(
-        (invoices ?? []).map((r: any) => [
+        (invoices ?? []).map((r: { id: string | number; invoice_no: string | null; site_address: string | null }) => [
           String(r.id),
           {
             id: String(r.id),
@@ -267,21 +259,19 @@ export async function GET(req: Request) {
         .in("id", customerIds);
 
       if (custErr) {
-        return jsonError(500, {
-          error: "Failed to load payment customers",
-          supabaseError: safeError(custErr),
-        });
+        console.error("[payments]", custErr);
+      return jsonError(500, { error: "Failed to load payment customers" });
       }
 
       customerMap = new Map(
-        (customers ?? []).map((r: any) => [
+        (customers ?? []).map((r: { id: string | number; name: string | null }) => [
           Number(r.id),
           { id: Number(r.id), name: r.name ?? null },
         ])
       );
     }
 
-    let rows = payments.map((r: any) => {
+    let rows = payments.map((r) => {
       const inv = invoiceMap.get(String(r.invoice_id));
       const cus = customerMap.get(Number(r.customer_id));
 
@@ -304,12 +294,12 @@ export async function GET(req: Request) {
 
     if (methodFilter !== "ALL") {
       rows = rows.filter(
-        (r: any) => String(r.method ?? "").toUpperCase() === methodFilter
+        (r) => String(r.method ?? "").toUpperCase() === methodFilter
       );
     }
 
     if (q) {
-      rows = rows.filter((r: any) => {
+      rows = rows.filter((r) => {
         const invoiceNo = String(r.invoice_no ?? "").toLowerCase();
         const customerName = String(r.customer_name ?? "").toLowerCase();
         const description = String(r.description ?? "").toLowerCase();
@@ -360,8 +350,11 @@ export async function GET(req: Request) {
         byMethod,
       },
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
     console.error("[GET /api/payments] fatal", e);
-    return jsonError(500, { error: e?.message ?? "Internal error" });
+    return jsonError(500, { error: "Internal error" });
   }
 }

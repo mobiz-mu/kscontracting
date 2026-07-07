@@ -22,7 +22,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 
 type Customer = {
   id: string | number;
@@ -41,15 +41,13 @@ type Customer = {
 type CustomerApiResponse = {
   ok: boolean;
   data?: Customer[];
-  error?: any;
-  supabaseError?: any;
+  error?: string;
 };
 
 type CustomerSaveResponse = {
   ok: boolean;
   data?: Customer;
-  error?: any;
-  supabaseError?: any;
+  error?: string;
 };
 
 function Surface({
@@ -118,13 +116,6 @@ function InfoRow({
   );
 }
 
-function fmtDate(v?: string | null) {
-  if (!v) return "—";
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toISOString().slice(0, 10);
-}
-
 async function safeJson<T>(res: Response): Promise<T> {
   const ct = res.headers.get("content-type") || "";
   const raw = await res.text();
@@ -152,7 +143,7 @@ async function safeJson<T>(res: Response): Promise<T> {
 export default function CustomerDetailsPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
-  const id = String((params as any)?.id ?? "").trim();
+  const id = String((params as Record<string, unknown> | null)?.id ?? "").trim();
 
   const [customer, setCustomer] = React.useState<Customer | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -209,8 +200,8 @@ export default function CustomerDetailsPage() {
 
       setCustomer(found);
       fillForm(found);
-    } catch (e: any) {
-      setError(e?.message || "Failed to load customer");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to load customer"));
       setCustomer(null);
     } finally {
       setLoading(false);
@@ -294,8 +285,8 @@ export default function CustomerDetailsPage() {
       setEditing(false);
       setSuccess("Customer updated successfully.");
       router.refresh();
-    } catch (e: any) {
-      setError(e?.message || "Failed to save customer");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to save customer"));
     } finally {
       setSaving(false);
     }

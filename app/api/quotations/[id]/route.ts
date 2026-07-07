@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requirePermission } from "@/lib/authz";
 import {
-  createSupabaseServerClient,
   createSupabaseAdminClient,
 } from "@/lib/supabase/server";
 
@@ -8,17 +8,8 @@ export const runtime = "nodejs";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-function jsonError(status: number, payload: any) {
+function jsonError(status: number, payload: Record<string, unknown>) {
   return NextResponse.json({ ok: false, ...payload }, { status });
-}
-
-function safeError(err: any) {
-  return {
-    message: err?.message ?? "Unknown error",
-    code: err?.code ?? null,
-    details: err?.details ?? null,
-    hint: err?.hint ?? null,
-  };
 }
 
 function isUuid(v: string) {
@@ -27,15 +18,11 @@ function isUuid(v: string) {
   );
 }
 
-function normalizeStatus(v: any) {
+function normalizeStatus(v: unknown) {
   const s = String(v ?? "").trim().toUpperCase();
   if (s === "ACCEPTED") return "ACCEPTED";
   if (s === "VOID") return "VOID";
   return "DRAFT";
-}
-
-function isDraftStatus(v: any) {
-  return String(v ?? "").trim().toUpperCase() === "DRAFT";
 }
 
 export async function GET(_request: NextRequest, { params }: Ctx) {
@@ -51,15 +38,7 @@ export async function GET(_request: NextRequest, { params }: Ctx) {
       return jsonError(400, { error: "Invalid quotation id" });
     }
 
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: userErr } = await supabase.auth.getUser();
-
-    if (userErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(userErr),
-      });
-    }
+    await requirePermission("quotations.view");
 
     const admin = createSupabaseAdminClient();
 
@@ -89,14 +68,11 @@ export async function GET(_request: NextRequest, { params }: Ctx) {
         converted_invoice_id
       `)
       .eq("id", safeId)
-      .eq("created_by", userRes.user.id)
       .maybeSingle();
 
     if (quoteErr) {
-      return jsonError(500, {
-        error: "Failed to load quotation",
-        supabaseError: safeError(quoteErr),
-      });
+      console.error("[quotations/[id]]", quoteErr);
+      return jsonError(500, { error: "Failed to load quotation" });
     }
 
     if (!quote) {
@@ -119,10 +95,8 @@ export async function GET(_request: NextRequest, { params }: Ctx) {
         .maybeSingle();
 
       if (custErr) {
-        return jsonError(500, {
-          error: "Failed to load quotation customer",
-          supabaseError: safeError(custErr),
-        });
+        console.error("[quotations/[id]]", custErr);
+      return jsonError(500, { error: "Failed to load quotation customer" });
       }
 
       linkedCustomer = customer ?? null;
@@ -144,10 +118,8 @@ export async function GET(_request: NextRequest, { params }: Ctx) {
       .order("id", { ascending: true });
 
     if (itemsErr) {
-      return jsonError(500, {
-        error: "Failed to load quotation items",
-        supabaseError: safeError(itemsErr),
-      });
+      console.error("[quotations/[id]]", itemsErr);
+      return jsonError(500, { error: "Failed to load quotation items" });
     }
 
     const statusKey = String(quote.status ?? "DRAFT").toUpperCase();
@@ -190,7 +162,7 @@ export async function GET(_request: NextRequest, { params }: Ctx) {
         can_convert: isAccepted && !isConverted && !isVoid,
 
         items:
-          (items ?? []).map((item: any) => ({
+          (items ?? []).map((item) => ({
             id: item.id,
             quotation_id: item.quotation_id,
             description: item.description ?? "",
@@ -205,9 +177,12 @@ export async function GET(_request: NextRequest, { params }: Ctx) {
           })) ?? [],
       },
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
     console.error("[GET /api/quotations/[id]] fatal", e);
-    return jsonError(500, { error: e?.message ?? "Internal error" });
+    return jsonError(500, { error: "Internal error" });
   }
 }
 
@@ -224,15 +199,7 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
       return jsonError(400, { error: "Invalid quotation id" });
     }
 
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: userErr } = await supabase.auth.getUser();
-
-    if (userErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(userErr),
-      });
-    }
+    await requirePermission("quotations.edit");
 
     const admin = createSupabaseAdminClient();
     const body = await request.json().catch(() => ({}));
@@ -246,14 +213,11 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
         converted_invoice_id
       `)
       .eq("id", safeId)
-      .eq("created_by", userRes.user.id)
       .maybeSingle();
 
     if (existingErr) {
-      return jsonError(500, {
-        error: "Failed to load quotation",
-        supabaseError: safeError(existingErr),
-      });
+      console.error("[quotations/[id]]", existingErr);
+      return jsonError(500, { error: "Failed to load quotation" });
     }
 
     if (!existing) {
@@ -299,7 +263,7 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
       });
     }
 
-    const payload: Record<string, any> = {
+    const payload: Record<string, unknown> = {
       status: nextStatus,
     };
 
@@ -307,7 +271,6 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
       .from("quotations")
       .update(payload)
       .eq("id", safeId)
-      .eq("created_by", userRes.user.id)
       .select(`
         id,
         quote_no,
@@ -333,10 +296,8 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
       .single();
 
     if (updateErr) {
-      return jsonError(500, {
-        error: "Failed to update quotation",
-        supabaseError: safeError(updateErr),
-      });
+      console.error("[quotations/[id]]", updateErr);
+      return jsonError(500, { error: "Failed to update quotation" });
     }
 
     const updatedStatus = String(updated.status ?? "DRAFT").toUpperCase();
@@ -354,10 +315,11 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
         can_convert: updatedIsAccepted && !updatedIsConverted && !updatedIsVoid,
       },
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
     console.error("[PATCH /api/quotations/[id]] fatal", e);
-    return jsonError(500, {
-      error: e?.message ?? "Internal error",
-    });
+    return jsonError(500, { error: "Internal error" });
   }
 }

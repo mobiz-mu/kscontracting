@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, FileSpreadsheet, Wallet } from "lucide-react";
+import { getErrorMessage } from "@/lib/utils";
 
 type LedgerRow = {
   type: "BILL" | "PAYMENT";
@@ -25,12 +26,12 @@ type Payload = {
     email: string | null;
     address: string | null;
   };
-  bills: any[];
-  payments: any[];
+  bills: unknown[];
+  payments: unknown[];
   ledger: LedgerRow[];
 };
 
-function money(v: any) {
+function money(v: unknown) {
   const n = Number(v ?? 0);
   return `Rs ${n.toLocaleString("en-MU", {
     minimumFractionDigits: 2,
@@ -40,7 +41,7 @@ function money(v: any) {
 
 export default function SubContractorLedgerPage() {
   const params = useParams<{ id: string }>();
-  const id = String((params as any)?.id ?? "").trim();
+  const id = String((params as Record<string, unknown> | null)?.id ?? "").trim();
 
   const [payload, setPayload] = React.useState<Payload | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -62,8 +63,8 @@ export default function SubContractorLedgerPage() {
       }
 
       setPayload(json.data ?? null);
-    } catch (e: any) {
-      setError(e?.message || "Failed to load ledger");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to load ledger"));
     } finally {
       setLoading(false);
     }
@@ -71,6 +72,7 @@ export default function SubContractorLedgerPage() {
 
   React.useEffect(() => {
     if (id) void load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: load on mount/param change only
   }, [id]);
 
   if (loading) {
@@ -131,7 +133,8 @@ export default function SubContractorLedgerPage() {
         <h2 className="mb-4 text-lg font-semibold">Ledger</h2>
 
         <div className="overflow-hidden rounded-xl border">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px] text-sm">
             <thead className="bg-slate-50 text-slate-600">
               <tr>
                 <th className="p-3 text-left">Date</th>
@@ -167,6 +170,7 @@ export default function SubContractorLedgerPage() {
               )}
             </tbody>
           </table>
+          </div>
         </div>
       </div>
     </div>

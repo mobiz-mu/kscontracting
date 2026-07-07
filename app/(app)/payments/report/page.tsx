@@ -5,7 +5,9 @@ import { ArrowLeft, Printer, RefreshCw } from "lucide-react";
 import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
+import { ReportFilterBar, downloadCsv, type ReportFilterValue } from "@/components/reports/ReportFilterBar";
+import { resolveDateRange, bucketLabel } from "@/lib/reports/period";
 
 type PaymentRow = {
   id: string;
@@ -69,7 +71,14 @@ export default function PaymentsReportPage() {
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
   const [rows, setRows] = React.useState<PaymentRow[]>([]);
-  const [kpi, setKpi] = React.useState<ApiListResponse<PaymentRow>["kpi"]>({});
+
+  const initialRange = resolveDateRange("this_month");
+  const [filters, setFilters] = React.useState<ReportFilterValue>({
+    period: "this_month",
+    from: initialRange.from,
+    to: initialRange.to,
+    group: "month",
+  });
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -77,11 +86,9 @@ export default function PaymentsReportPage() {
     try {
       const j = await safeGet<ApiListResponse<PaymentRow>>("/api/payments?page=1&pageSize=500");
       setRows(j.data ?? []);
-      setKpi(j.kpi ?? {});
-    } catch (e: any) {
-      setError(e?.message || "Failed to load report");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to load report"));
       setRows([]);
-      setKpi({});
     } finally {
       setLoading(false);
     }
@@ -90,6 +97,54 @@ export default function PaymentsReportPage() {
   React.useEffect(() => {
     void load();
   }, [load]);
+
+  const filteredRows = React.useMemo(() => {
+    return rows.filter((r) => {
+      const d = (r.payment_date || r.created_at || "").slice(0, 10);
+      if (!d) return true;
+      return d >= filters.from && d <= filters.to;
+    });
+  }, [rows, filters.from, filters.to]);
+
+  const kpi = React.useMemo(() => {
+    const totalPayments = filteredRows.length;
+    const totalAmount = filteredRows.reduce((s, r) => s + Number(r.amount ?? 0), 0);
+    const byMethod: Record<string, number> = {};
+    filteredRows.forEach((r) => {
+      const m = String(r.method ?? "OTHER").toUpperCase();
+      byMethod[m] = (byMethod[m] ?? 0) + 1;
+    });
+    return { totalPayments, totalAmount, byMethod };
+  }, [filteredRows]);
+
+  const groupedPayments = React.useMemo(() => {
+    const map = new Map<string, { period: string; amount: number; count: number }>();
+    filteredRows.forEach((r) => {
+      const dateStr = (r.payment_date || r.created_at || "").slice(0, 10);
+      if (!dateStr) return;
+      const label = bucketLabel(dateStr, filters.group);
+      const prev = map.get(label) || { period: label, amount: 0, count: 0 };
+      prev.amount += Number(r.amount ?? 0);
+      prev.count += 1;
+      map.set(label, prev);
+    });
+    return Array.from(map.values()).sort((a, b) => a.period.localeCompare(b.period));
+  }, [filteredRows, filters.group]);
+
+  function exportPaymentsCsv() {
+    downloadCsv(
+      "payments-report.csv",
+      filteredRows.map((r) => ({
+        date: fmtDate(r.payment_date),
+        customer: r.customer_name || "",
+        invoice: r.invoice_no || "",
+        description: r.description || "",
+        site: r.site_address || "",
+        method: r.method || "",
+        amount: Number(r.amount ?? 0).toFixed(2),
+      }))
+    );
+  }
 
   return (
     <>
@@ -181,6 +236,15 @@ export default function PaymentsReportPage() {
           </Button>
         </div>
 
+        <div className="print-hide">
+          <ReportFilterBar
+            value={filters}
+            onChange={setFilters}
+            onExportCsv={exportPaymentsCsv}
+            onPrint={() => window.print()}
+          />
+        </div>
+
         {error ? (
           <div className="print-hide rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
             {error}
@@ -219,8 +283,8 @@ export default function PaymentsReportPage() {
               </div>
             </div>
 
-            <div className="print-table-wrap mt-5 overflow-hidden rounded-2xl border border-slate-200">
-              <table className="print-table w-full border-collapse text-sm">
+            <div className="print-table-wrap mt-5 overflow-x-auto rounded-2xl border border-slate-200">
+              <table className="print-table w-full min-w-[760px] border-collapse text-sm">
                 <thead>
                   <tr className="bg-slate-50 text-left text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
                     <th className="px-3 py-3">Date</th>
@@ -233,14 +297,14 @@ export default function PaymentsReportPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
-                  {rows.length === 0 ? (
+                  {filteredRows.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="px-4 py-10 text-center text-sm text-slate-500">
-                        No payments found.
+                        No payments found for this period.
                       </td>
                     </tr>
                   ) : (
-                    rows.map((r) => (
+                    filteredRows.map((r) => (
                       <tr key={r.id}>
                         <td className="px-3 py-3 text-slate-900">{fmtDate(r.payment_date)}</td>
                         <td className="px-3 py-3 text-slate-900">{r.customer_name || "—"}</td>
@@ -256,6 +320,40 @@ export default function PaymentsReportPage() {
                   )}
                 </tbody>
               </table>
+            </div>
+
+            <div className="print-hide mt-5 rounded-2xl border border-slate-200 p-4">
+              <div className="text-sm font-semibold text-slate-900">
+                Breakdown by {filters.group === "day" ? "Day" : filters.group === "quarter" ? "Quarter" : filters.group === "year" ? "Year" : "Month"}
+              </div>
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full min-w-[420px] text-sm">
+                  <thead className="bg-slate-50 text-slate-600">
+                    <tr className="[&>th]:px-3 [&>th]:py-2 [&>th]:text-left [&>th]:font-semibold">
+                      <th>Period</th>
+                      <th className="text-right">Payments</th>
+                      <th className="text-right">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {groupedPayments.length === 0 ? (
+                      <tr>
+                        <td colSpan={3} className="px-3 py-6 text-center text-slate-500">
+                          No data for this period.
+                        </td>
+                      </tr>
+                    ) : (
+                      groupedPayments.map((g) => (
+                        <tr key={g.period}>
+                          <td className="px-3 py-2 font-semibold text-slate-900">{g.period}</td>
+                          <td className="px-3 py-2 text-right text-slate-700">{g.count}</td>
+                          <td className="px-3 py-2 text-right text-blue-700">{money(g.amount)}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>

@@ -1,30 +1,21 @@
 import { NextResponse } from "next/server";
+import { requirePermission } from "@/lib/authz";
 import {
-  createSupabaseServerClient,
   createSupabaseAdminClient,
 } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
-function jsonError(status: number, payload: any) {
+function jsonError(status: number, payload: Record<string, unknown>) {
   return NextResponse.json({ ok: false, ...payload }, { status });
 }
 
-function safeError(err: any) {
-  return {
-    message: err?.message ?? "Unknown error",
-    code: err?.code ?? null,
-    details: err?.details ?? null,
-    hint: err?.hint ?? null,
-  };
-}
-
-function n2(v: any) {
+function n2(v: unknown) {
   const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
 }
 
-function calcTotals(items: any[]) {
+function calcTotals(items: Array<{ description?: unknown; qty?: unknown; unit_price?: unknown; vat_rate?: unknown }>) {
   const normalized = (items ?? []).map((item) => {
     const qty = n2(item.qty || 0);
     const unitPrice = n2(item.unit_price || 0);
@@ -59,15 +50,7 @@ function calcTotals(items: any[]) {
 
 export async function GET(req: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: uErr } = await supabase.auth.getUser();
-
-    if (uErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(uErr),
-      });
-    }
+    await requirePermission("purchase_bills.view");
 
     const url = new URL(req.url);
     const q = (url.searchParams.get("q") ?? "").trim();
@@ -111,35 +94,26 @@ export async function GET(req: Request) {
     const { data, error } = await query;
 
     if (error) {
-      return jsonError(500, {
-        error: "Failed to load purchase bills",
-        supabaseError: safeError(error),
-      });
+      console.error("[purchase-bills]", error);
+      return jsonError(500, { error: "Failed to load purchase bills" });
     }
 
     return NextResponse.json({
       ok: true,
       data: data ?? [],
     });
-  } catch (e: any) {
-    return jsonError(500, {
-      error: "Internal error",
-      supabaseError: safeError(e),
-    });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
+    console.error("[purchase-bills]", e);
+      return jsonError(500, { error: "Internal error" });
   }
 }
 
 export async function POST(req: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: uErr } = await supabase.auth.getUser();
-
-    if (uErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(uErr),
-      });
-    }
+    await requirePermission("purchase_bills.create");
 
     const supabaseAdmin = createSupabaseAdminClient();
     const body = await req.json().catch(() => ({}));
@@ -151,7 +125,8 @@ export async function POST(req: Request) {
     const status = String(body.status ?? "DRAFT").trim() || "DRAFT";
     const description = String(body.description ?? "").trim() || null;
     const notes = String(body.notes ?? "").trim() || null;
-    const itemsInput = Array.isArray(body.items) ? body.items : [];
+    type RawBillItemInput = { description?: unknown; qty?: unknown; unit_price?: unknown; vat_rate?: unknown };
+    const itemsInput: RawBillItemInput[] = Array.isArray(body.items) ? body.items : [];
 
     if (!billNo) {
       return jsonError(400, { error: "bill_no is required" });
@@ -166,7 +141,7 @@ export async function POST(req: Request) {
     }
 
     const validItems = itemsInput.filter(
-      (x: any) => String(x?.description ?? "").trim() !== ""
+      (x) => String(x?.description ?? "").trim() !== ""
     );
 
     if (validItems.length === 0) {
@@ -195,10 +170,8 @@ export async function POST(req: Request) {
       .single();
 
     if (billError || !bill) {
-      return jsonError(500, {
-        error: "Failed to create purchase bill",
-        supabaseError: safeError(billError),
-      });
+      console.error("[purchase-bills]", billError);
+      return jsonError(500, { error: "Failed to create purchase bill" });
     }
 
     const itemsPayload = totals.items.map((item) => ({
@@ -218,17 +191,16 @@ export async function POST(req: Request) {
     if (itemsError) {
       await supabaseAdmin.from("purchase_bills").delete().eq("id", bill.id);
 
-      return jsonError(500, {
-        error: "Failed to create purchase bill items",
-        supabaseError: safeError(itemsError),
-      });
+      console.error("[purchase-bills]", itemsError);
+      return jsonError(500, { error: "Failed to create purchase bill items" });
     }
 
     return NextResponse.json({ ok: true, data: bill }, { status: 201 });
-  } catch (e: any) {
-    return jsonError(500, {
-      error: "Internal error",
-      supabaseError: safeError(e),
-    });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
+    console.error("[purchase-bills]", e);
+      return jsonError(500, { error: "Internal error" });
   }
 }

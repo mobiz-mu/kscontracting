@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
+import { requirePermission } from "@/lib/authz";
 import {
-  createSupabaseServerClient,
   createSupabaseAdminClient,
 } from "@/lib/supabase/server";
 
@@ -35,15 +35,6 @@ type CreditNoteListRow = {
 
 function jsonError(status: number, payload: unknown) {
   return NextResponse.json({ ok: false, ...(payload as object) }, { status });
-}
-
-function safeError(err: any) {
-  return {
-    message: err?.message ?? "Unknown error",
-    code: err?.code ?? null,
-    details: err?.details ?? null,
-    hint: err?.hint ?? null,
-  };
 }
 
 function n2(v: unknown) {
@@ -95,20 +86,19 @@ export async function POST(req: Request) {
       return jsonError(400, { error: "Credit note must contain items" });
     }
 
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: userErr } = await supabase.auth.getUser();
-
-    if (userErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(userErr),
-      });
-    }
+    const authz = await requirePermission("credit_notes.create");
 
     const admin = createSupabaseAdminClient();
 
-    const cleanItems: CleanCreditNoteItem[] = (rows as any[])
-      .map((it: any): CleanCreditNoteItem => {
+    type RawCreditNoteItemInput = {
+      description?: unknown;
+      qty?: unknown;
+      unit_price_excl_vat?: unknown;
+      price?: unknown;
+    };
+
+    const cleanItems: CleanCreditNoteItem[] = (rows as RawCreditNoteItemInput[])
+      .map((it): CleanCreditNoteItem => {
         const description = String(it.description ?? "").trim();
         const qty = n2(it.qty);
         const unit_price_excl_vat = n2(
@@ -173,7 +163,7 @@ export async function POST(req: Request) {
         applied_amount: 0,
         remaining_amount: total_amount,
         status,
-        created_by: userRes.user.id,
+        created_by: authz.userId,
       })
       .select(
         `
@@ -197,10 +187,8 @@ export async function POST(req: Request) {
       .single();
 
     if (noteErr) {
-      return jsonError(500, {
-        error: "Failed to create credit note",
-        supabaseError: safeError(noteErr),
-      });
+      console.error("[credit/notes/ts]", noteErr);
+      return jsonError(500, { error: "Failed to create credit note" });
     }
 
     const itemsPayload = cleanItems.map((item: CleanCreditNoteItem) => ({
@@ -232,10 +220,8 @@ export async function POST(req: Request) {
     if (itemsErr) {
       await admin.from("credit_notes").delete().eq("id", creditNote.id);
 
-      return jsonError(500, {
-        error: "Failed to insert credit note items",
-        supabaseError: safeError(itemsErr),
-      });
+      console.error("[credit/notes/ts]", itemsErr);
+      return jsonError(500, { error: "Failed to insert credit note items" });
     }
 
     return NextResponse.json({
@@ -245,23 +231,18 @@ export async function POST(req: Request) {
         items: insertedItems ?? [],
       },
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
     console.error("[POST /api/credit-notes] fatal", e);
-    return jsonError(500, { error: e?.message ?? "Internal error" });
+    return jsonError(500, { error: "Internal error" });
   }
 }
 
 export async function GET(req: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: userErr } = await supabase.auth.getUser();
-
-    if (userErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(userErr),
-      });
-    }
+    await requirePermission("credit_notes.view");
 
     const { searchParams } = new URL(req.url);
     const q = (searchParams.get("q") ?? "").trim();
@@ -300,7 +281,6 @@ export async function GET(req: Request) {
       `,
         { count: "exact" }
       )
-      .eq("created_by", userRes.user.id)
       .order("created_at", { ascending: false });
 
     if (status !== "ALL") {
@@ -314,17 +294,17 @@ export async function GET(req: Request) {
     const { data, error, count } = await query.range(from, to);
 
     if (error) {
-      return jsonError(500, {
-        error: "Failed to load credit notes",
-        supabaseError: safeError(error),
-      });
+      console.error("[credit/notes/ts]", error);
+      return jsonError(500, { error: "Failed to load credit notes" });
     }
 
-    const mappedRows: CreditNoteListRow[] = (data ?? []).map((r: any) => ({
-      id: r.id,
-      credit_no: r.credit_no,
-      customer_id: r.customer_id ?? null,
-      customer_name: r.customers?.name ?? null,
+    const mappedRows: CreditNoteListRow[] = (data ?? []).map((r) => {
+      const customer = Array.isArray(r.customers) ? r.customers[0] : r.customers;
+      return {
+        id: r.id,
+        credit_no: r.credit_no,
+        customer_id: r.customer_id ?? null,
+        customer_name: customer?.name ?? null,
       invoice_id: r.invoice_id ?? null,
       credit_date: r.credit_date ?? null,
       reason: r.reason ?? null,
@@ -336,7 +316,8 @@ export async function GET(req: Request) {
       remaining_amount: n2(r.remaining_amount),
       status: r.status ?? "DRAFT",
       created_at: r.created_at ?? null,
-    }));
+      };
+    });
 
     return NextResponse.json({
       ok: true,
@@ -348,8 +329,11 @@ export async function GET(req: Request) {
         hasMore: (count ?? 0) > to + 1,
       },
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
     console.error("[GET /api/credit-notes] fatal", e);
-    return jsonError(500, { error: e?.message ?? "Internal error" });
+    return jsonError(500, { error: "Internal error" });
   }
 }

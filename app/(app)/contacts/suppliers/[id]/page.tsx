@@ -20,7 +20,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 
 type Supplier = {
   id: number | string;
@@ -33,7 +33,7 @@ type Supplier = {
   created_at?: string | null;
 };
 
-type ApiResp = { ok: boolean; data?: Supplier; error?: any };
+type ApiResp = { ok: boolean; data?: Supplier; error?: string };
 
 async function safeGet<T>(url: string): Promise<T> {
   const res = await fetch(url, { cache: "no-store" });
@@ -86,8 +86,8 @@ async function safeMutation<T>(url: string, init?: RequestInit): Promise<T> {
   return JSON.parse(raw) as T;
 }
 
-function getParamId(p: any): string {
-  const raw = p?.id;
+function getParamId(p: unknown): string {
+  const raw = (p as Record<string, unknown> | null)?.id;
   if (Array.isArray(raw)) return String(raw[0] ?? "").trim();
   return String(raw ?? "").trim();
 }
@@ -211,8 +211,8 @@ export default function SupplierDetailsPage() {
       if (loadedSupplier) {
         fillForm(loadedSupplier);
       }
-    } catch (e: any) {
-      setErr(e?.message ?? "Failed to load supplier");
+    } catch (e: unknown) {
+      setErr(getErrorMessage(e, "Failed to load supplier"));
       setSupplier(null);
     } finally {
       setLoading(false);
@@ -291,8 +291,8 @@ export default function SupplierDetailsPage() {
       setEditing(false);
       setSuccess("Supplier updated successfully.");
       router.refresh();
-    } catch (e: any) {
-      setErr(e?.message ?? "Failed to update supplier");
+    } catch (e: unknown) {
+      setErr(getErrorMessage(e, "Failed to update supplier"));
     } finally {
       setSaving(false);
     }

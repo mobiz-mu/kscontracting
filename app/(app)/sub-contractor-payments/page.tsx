@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import * as React from "react";
 import Link from "next/link";
@@ -6,6 +6,7 @@ import { Plus, Search, RefreshCw, ArrowUpRight, Wallet } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { getErrorMessage } from "@/lib/utils";
 
 type PaymentRow = {
   id: number;
@@ -19,7 +20,7 @@ type PaymentRow = {
   purchase_bills?: { id?: number | null; bill_no?: string | null } | null;
 };
 
-function money(v: any) {
+function money(v: unknown) {
   const n = Number(v ?? 0);
   return `Rs ${n.toLocaleString("en-MU", {
     minimumFractionDigits: 2,
@@ -51,8 +52,8 @@ export default function SubContractorPaymentsPage() {
       }
 
       setRows(json.data ?? []);
-    } catch (e: any) {
-      setError(e?.message || "Failed to load payments");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to load payments"));
     } finally {
       setLoading(false);
     }
@@ -60,6 +61,7 @@ export default function SubContractorPaymentsPage() {
 
   React.useEffect(() => {
     void load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: load on mount/param change only
   }, []);
 
   return (
@@ -101,17 +103,18 @@ export default function SubContractorPaymentsPage() {
       {error ? <div className="text-sm text-red-500">{error}</div> : null}
 
       <div className="overflow-hidden rounded-xl border bg-white">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-slate-600">
-            <tr>
-              <th className="p-3 text-left">Payment No.</th>
-              <th className="p-3 text-left">Date</th>
-              <th className="p-3 text-left">Sub Contractor</th>
-              <th className="p-3 text-left">Purchase Bill</th>
-              <th className="p-3 text-left">Method</th>
-              <th className="p-3 text-left">Reference</th>
-              <th className="p-3 text-right">Amount</th>
-              <th className="p-3 text-right"></th>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[860px] text-sm">
+            <thead className="bg-slate-50 text-slate-600">
+              <tr>
+                <th className="p-3 text-left">Payment No.</th>
+                <th className="p-3 text-left">Date</th>
+                <th className="p-3 text-left">Sub Contractor</th>
+                <th className="p-3 text-left">Purchase Bill</th>
+                <th className="p-3 text-left">Method</th>
+                <th className="p-3 text-left">Reference</th>
+                <th className="p-3 text-right">Amount</th>
+                <th className="p-3 text-right"></th>
             </tr>
           </thead>
           <tbody>
@@ -159,6 +162,7 @@ export default function SubContractorPaymentsPage() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

@@ -22,18 +22,18 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 
 /* =========================================
    Helpers
 ========================================= */
 
-function n2(v: any) {
+function n2(v: unknown) {
   const x = Number(v ?? 0);
   return Number.isFinite(x) ? x : 0;
 }
 
-function money(v: any) {
+function money(v: unknown) {
   const n = n2(v);
   return `Rs ${n.toLocaleString("en-MU", {
     minimumFractionDigits: 2,
@@ -49,7 +49,7 @@ function todayYMD() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-async function safePost<T>(url: string, body: any): Promise<T> {
+async function safePost<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
     method: "POST",
     cache: "no-store",
@@ -60,14 +60,16 @@ async function safePost<T>(url: string, body: any): Promise<T> {
   });
 
   const raw = await res.text();
-  let parsed: any = null;
+  let parsed: { error?: string; message?: string } | null = null;
 
   try {
     parsed = raw ? JSON.parse(raw) : null;
-  } catch {}
+  } catch {
+    // ignore — fall back to the generic HTTP status message below
+  }
 
   if (!res.ok) {
-    throw new Error(parsed?.error?.message ?? parsed?.error ?? parsed?.message ?? `HTTP ${res.status}`);
+    throw new Error(parsed?.error ?? parsed?.message ?? `HTTP ${res.status}`);
   }
 
   return parsed as T;
@@ -181,7 +183,7 @@ type PaymentResponse = {
   ok: boolean;
   message?: string;
   data?: {
-    payment?: any;
+    payment?: unknown;
     invoice?: {
       id: string;
       invoice_no: string;
@@ -191,7 +193,7 @@ type PaymentResponse = {
       balance_amount: number;
     };
   };
-  error?: any;
+  error?: string;
 };
 
 /* =========================================
@@ -257,7 +259,7 @@ export default function NewPaymentPage() {
       );
 
       if (!res.ok) {
-        throw new Error(res?.error?.message ?? res?.error ?? "Failed to add payment");
+        throw new Error(res?.error ?? "Failed to add payment");
       }
 
       const updatedInvoice = res?.data?.invoice;
@@ -274,8 +276,8 @@ export default function NewPaymentPage() {
           router.push("/sales/invoices");
         }
       }, 900);
-    } catch (e: any) {
-      setErrorMsg(e?.message || "Failed to add payment");
+    } catch (e: unknown) {
+      setErrorMsg(getErrorMessage(e, "Failed to add payment"));
     } finally {
       setSaving(false);
     }

@@ -15,35 +15,23 @@ type UserRoleJoinRow = {
   role_id: number;
   is_active: boolean;
   created_at: string | null;
-  roles: RoleRow[] | null;
+  roles: RoleRow | RoleRow[] | null;
 };
 
-function jsonError(status: number, payload: any) {
+function jsonError(status: number, payload: Record<string, unknown>) {
   return NextResponse.json({ ok: false, ...payload }, { status });
-}
-
-function safeError(err: any) {
-  return {
-    message: err?.message ?? "Unknown error",
-    code: err?.code ?? null,
-    details: err?.details ?? null,
-    hint: err?.hint ?? null,
-  };
 }
 
 export async function GET() {
   try {
-    await requirePermission("settings.manage");
+    await requirePermission("users.manage");
 
     const admin = createSupabaseAdminClient();
 
     const { data: usersRes, error: usersErr } = await admin.auth.admin.listUsers();
 
     if (usersErr) {
-      return jsonError(500, {
-        error: "Failed to load auth users",
-        supabaseError: safeError(usersErr),
-      });
+      console.error("[settings/users]", usersErr); return jsonError(500, { error: "Failed to load auth users" });
     }
 
     const { data: roles, error: rolesErr } = await admin
@@ -52,10 +40,7 @@ export async function GET() {
       .order("id", { ascending: true });
 
     if (rolesErr) {
-      return jsonError(500, {
-        error: "Failed to load roles",
-        supabaseError: safeError(rolesErr),
-      });
+      console.error("[settings/users]", rolesErr); return jsonError(500, { error: "Failed to load roles" });
     }
 
     const { data: userRoles, error: userRolesErr } = await admin
@@ -75,10 +60,7 @@ export async function GET() {
       .order("created_at", { ascending: true });
 
     if (userRolesErr) {
-      return jsonError(500, {
-        error: "Failed to load user roles",
-        supabaseError: safeError(userRolesErr),
-      });
+      console.error("[settings/users]", userRolesErr); return jsonError(500, { error: "Failed to load user roles" });
     }
 
     const safeRoles: RoleRow[] = Array.isArray(roles) ? (roles as RoleRow[]) : [];
@@ -86,7 +68,7 @@ export async function GET() {
       ? (userRoles as UserRoleJoinRow[])
       : [];
 
-    const rows = (usersRes?.users ?? []).map((u: any) => {
+    const rows = (usersRes?.users ?? []).map((u) => {
       const assignedRoles = safeUserRoles.filter(
         (x) => String(x.user_id) === String(u.id)
       );
@@ -97,7 +79,7 @@ export async function GET() {
         created_at: u.created_at ?? null,
         last_sign_in_at: u.last_sign_in_at ?? null,
         roles: assignedRoles.map((r) => {
-          const role = Array.isArray(r.roles) ? r.roles[0] : null;
+          const role = Array.isArray(r.roles) ? r.roles[0] : r.roles;
 
           return {
             role_id: r.role_id,
@@ -115,21 +97,18 @@ export async function GET() {
         roles: safeRoles,
       },
     });
-  } catch (e: any) {
-    const msg = String(e?.message ?? "");
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
     if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
     if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
 
-    return jsonError(500, {
-      error: "Failed to load users",
-      supabaseError: safeError(e),
-    });
+    console.error("[settings/users]", e); return jsonError(500, { error: "Failed to load users" });
   }
 }
 
 export async function POST(req: Request) {
   try {
-    await requirePermission("settings.manage");
+    await requirePermission("users.manage");
 
     const body = await req.json().catch(() => ({}));
     const userId = String(body?.user_id ?? "").trim();
@@ -152,10 +131,7 @@ export async function POST(req: Request) {
       .eq("user_id", userId);
 
     if (clearErr) {
-      return jsonError(500, {
-        error: "Failed to clear user roles",
-        supabaseError: safeError(clearErr),
-      });
+      console.error("[settings/users]", clearErr); return jsonError(500, { error: "Failed to clear user roles" });
     }
 
     if (roleIds.length > 0) {
@@ -170,10 +146,7 @@ export async function POST(req: Request) {
         .insert(payload);
 
       if (insertErr) {
-        return jsonError(500, {
-          error: "Failed to assign roles",
-          supabaseError: safeError(insertErr),
-        });
+        console.error("[settings/users]", insertErr); return jsonError(500, { error: "Failed to assign roles" });
       }
     }
 
@@ -181,14 +154,11 @@ export async function POST(req: Request) {
       ok: true,
       message: "User roles updated successfully",
     });
-  } catch (e: any) {
-    const msg = String(e?.message ?? "");
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
     if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
     if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
 
-    return jsonError(500, {
-      error: "Failed to update user roles",
-      supabaseError: safeError(e),
-    });
+    console.error("[settings/users]", e); return jsonError(500, { error: "Failed to update user roles" });
   }
 }

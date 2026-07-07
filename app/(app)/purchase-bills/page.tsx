@@ -12,6 +12,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { getErrorMessage } from "@/lib/utils";
 
 type PurchaseBillRow = {
   id: number;
@@ -27,7 +28,7 @@ type PurchaseBillRow = {
   } | null;
 };
 
-function money(v: any) {
+function money(v: unknown) {
   const n = Number(v ?? 0);
   return `Rs ${n.toLocaleString("en-MU", {
     minimumFractionDigits: 2,
@@ -65,8 +66,8 @@ export default function PurchaseBillsPage() {
       }
 
       setRows(json.data ?? []);
-    } catch (e: any) {
-      setError(e?.message || "Failed to load purchase bills");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to load purchase bills"));
     } finally {
       setLoading(false);
     }
@@ -74,6 +75,7 @@ export default function PurchaseBillsPage() {
 
   React.useEffect(() => {
     void load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: load on mount/param change only
   }, []);
 
   return (
@@ -115,13 +117,14 @@ export default function PurchaseBillsPage() {
       {error ? <div className="text-sm text-red-500">{error}</div> : null}
 
       <div className="overflow-hidden rounded-xl border bg-white">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-slate-600">
-            <tr>
-              <th className="p-3 text-left">Bill No.</th>
-              <th className="p-3 text-left">Sub Contractor</th>
-              <th className="p-3 text-left">Bill Date</th>
-              <th className="p-3 text-left">Due Date</th>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[900px] text-sm">
+            <thead className="bg-slate-50 text-slate-600">
+              <tr>
+                <th className="p-3 text-left">Bill No.</th>
+                <th className="p-3 text-left">Sub Contractor</th>
+                <th className="p-3 text-left">Bill Date</th>
+                <th className="p-3 text-left">Due Date</th>
               <th className="p-3 text-left">Status</th>
               <th className="p-3 text-right">Total</th>
               <th className="p-3 text-right">Paid</th>
@@ -170,6 +173,7 @@ export default function PurchaseBillsPage() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

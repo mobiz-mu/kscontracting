@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { NextResponse } from "next/server";
+import { requirePermission } from "@/lib/authz";
 import {
-  createSupabaseServerClient,
   createSupabaseAdminClient,
 } from "@/lib/supabase/server";
 
@@ -9,17 +9,8 @@ export const runtime = "nodejs";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-function jsonError(status: number, payload: any) {
+function jsonError(status: number, payload: Record<string, unknown>) {
   return NextResponse.json({ ok: false, ...payload }, { status });
-}
-
-function safeError(err: any) {
-  return {
-    message: err?.message ?? "Unknown error",
-    code: err?.code ?? null,
-    details: err?.details ?? null,
-    hint: err?.hint ?? null,
-  };
 }
 
 function isUuid(v: string) {
@@ -34,15 +25,7 @@ export async function POST(_req: Request, ctx: RouteContext) {
   if (!isUuid(safeId)) return jsonError(400, { error: "Invalid invoice id" });
 
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: uErr } = await supabase.auth.getUser();
-
-    if (uErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(uErr),
-      });
-    }
+    const authz = await requirePermission("invoices.share");
 
     const admin = createSupabaseAdminClient();
 
@@ -50,14 +33,11 @@ export async function POST(_req: Request, ctx: RouteContext) {
       .from("invoices")
       .select("id, invoice_no, created_by")
       .eq("id", safeId)
-      .eq("created_by", userRes.user.id)
       .maybeSingle();
 
     if (invErr) {
-      return jsonError(500, {
-        error: "Failed to load invoice",
-        supabaseError: safeError(invErr),
-      });
+      console.error("[invoices/[id]/share-link]", invErr);
+      return jsonError(500, { error: "Failed to load invoice" });
     }
 
     if (!invoice) {
@@ -75,14 +55,12 @@ export async function POST(_req: Request, ctx: RouteContext) {
         invoice_id: invoice.id,
         token,
         expires_at: expiresAt.toISOString(),
-        created_by: userRes.user.id,
+        created_by: authz.userId,
       });
 
     if (insertErr) {
-      return jsonError(500, {
-        error: "Failed to create share link",
-        supabaseError: safeError(insertErr),
-      });
+      console.error("[invoices/[id]/share-link]", insertErr);
+      return jsonError(500, { error: "Failed to create share link" });
     }
 
     const appUrl = String(
@@ -100,10 +78,44 @@ export async function POST(_req: Request, ctx: RouteContext) {
         expires_at: expiresAt.toISOString(),
       },
     });
-  } catch (e: any) {
-    return jsonError(500, {
-      error: "Failed to create share link",
-      details: e?.message ?? String(e),
-    });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
+    console.error("[invoices/[id]/share-link]", e);
+    return jsonError(500, { error: "Failed to create share link" });
+  }
+}
+
+export async function DELETE(_req: Request, ctx: RouteContext) {
+  const { id } = await ctx.params;
+  const safeId = String(id ?? "").trim();
+
+  if (!safeId) return jsonError(400, { error: "Missing invoice id" });
+  if (!isUuid(safeId)) return jsonError(400, { error: "Invalid invoice id" });
+
+  try {
+    await requirePermission("invoices.share");
+
+    const admin = createSupabaseAdminClient();
+
+    const { error } = await admin
+      .from("invoice_share_tokens")
+      .update({ revoked_at: new Date().toISOString() })
+      .eq("invoice_id", safeId)
+      .is("revoked_at", null);
+
+    if (error) {
+      console.error("[invoices/[id]/share-link DELETE]", error);
+      return jsonError(500, { error: "Failed to revoke share link" });
+    }
+
+    return NextResponse.json({ ok: true, message: "Share link revoked" });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
+    console.error("[invoices/[id]/share-link DELETE]", e);
+    return jsonError(500, { error: "Failed to revoke share link" });
   }
 }

@@ -108,7 +108,7 @@ export default function HomePage() {
               Credit & Wallet Logic
             </div>
             <p className="mt-2 text-sm text-white/60">
-              Automated credit application with full audit logs.
+              Apply credit notes to invoices with full application history.
             </p>
           </div>
         </div>

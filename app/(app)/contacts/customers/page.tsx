@@ -20,7 +20,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 
 type Customer = {
   id: number;
@@ -165,8 +165,8 @@ export default function CustomersPage() {
       }
 
       setRows(json.data ?? []);
-    } catch (e: any) {
-      setError(e.message || "Failed to load customers");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to load customers"));
       setRows([]);
     } finally {
       setLoading(false);

@@ -7,6 +7,7 @@ import { ArrowLeft, Save } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { getErrorMessage } from "@/lib/utils";
 
 type SubContractor = {
   id: number;
@@ -21,7 +22,7 @@ type PurchaseBill = {
   status?: string | null;
 };
 
-function money(v: any) {
+function money(v: unknown) {
   const n = Number(v ?? 0);
   return `Rs ${n.toLocaleString("en-MU", {
     minimumFractionDigits: 2,
@@ -67,7 +68,8 @@ export default function NewSubContractorPaymentPage() {
         if (billsRes.ok && billsJson?.ok) {
           setBills(
             (billsJson.data ?? []).filter(
-              (x: any) => Number(x.balance_amount ?? 0) > 0 && x.status !== "VOID"
+              (x: { balance_amount?: number; status?: string }) =>
+                Number(x.balance_amount ?? 0) > 0 && x.status !== "VOID"
             )
           );
         }
@@ -138,8 +140,8 @@ export default function NewSubContractorPaymentPage() {
       }
 
       router.push("/sub-contractor-payments");
-    } catch (e: any) {
-      alert(e?.message || "Failed to create payment");
+    } catch (e: unknown) {
+      alert(getErrorMessage(e, "Failed to create payment"));
     } finally {
       setSaving(false);
     }

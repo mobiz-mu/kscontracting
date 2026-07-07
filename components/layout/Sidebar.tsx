@@ -57,7 +57,7 @@ type PermissionsResponse = {
     roleKeys: string[];
     permissions: string[];
   };
-  error?: any;
+  error?: string;
 };
 
 const NAV_GROUPS: NavGroup[] = [
@@ -115,7 +115,7 @@ const NAV_GROUPS: NavGroup[] = [
         label: "Convert to Invoice",
         href: "/sales/quotations/convert",
         icon: Layers3,
-        permissions: ["quotations.view", "invoices.view"],
+        permissions: ["quotations.convert"],
       },
     ],
   },
@@ -136,14 +136,14 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "Contact",
     icon: FolderKanban,
-    permissions: ["contacts.manage"],
+    permissions: ["contacts.view"],
     href: "/contacts",
     children: [
       {
         label: "Customers",
         href: "/contacts/customers",
         icon: Users,
-        permissions: ["contacts.manage"],
+        permissions: ["contacts.view"],
       },
       {
         label: "New Customer",
@@ -155,7 +155,7 @@ const NAV_GROUPS: NavGroup[] = [
         label: "Suppliers",
         href: "/contacts/suppliers",
         icon: Truck,
-        permissions: ["contacts.manage"],
+        permissions: ["contacts.view"],
       },
       {
         label: "New Supplier",
@@ -167,7 +167,7 @@ const NAV_GROUPS: NavGroup[] = [
         label: "Sub Contractors",
         href: "/contacts/sub-contractors",
         icon: HardHat,
-        permissions: ["contacts.manage"],
+        permissions: ["contacts.view"],
       },
       {
         label: "New Sub Contractor",
@@ -180,13 +180,21 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "Purchase Bills",
     icon: FileSpreadsheet,
-    permissions: ["contacts.manage"],
+    permissions: ["purchase_bills.view"],
     href: "/purchase-bills",
+    children: [
+      {
+        label: "New Purchase Bill",
+        href: "/purchase-bills/new",
+        icon: FilePlus2,
+        permissions: ["purchase_bills.create", "purchase_bills.view"],
+      },
+    ],
   },
   {
     label: "Sub Contractor Payments",
     icon: Wallet,
-    permissions: ["contacts.manage"],
+    permissions: ["purchase_bills.view"],
     href: "/sub-contractor-payments",
   },
   {
@@ -205,7 +213,7 @@ const NAV_GROUPS: NavGroup[] = [
         label: "Sub Contractor Payables",
         href: "/reports/sub-contractor-payables",
         icon: WalletCards,
-        permissions: ["reports.view", "contacts.manage"],
+        permissions: ["reports.view"],
       },
     ],
   },
@@ -218,8 +226,8 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "Users",
     icon: Users,
-    permissions: ["settings.manage"],
-    href: "/users",
+    permissions: ["users.manage"],
+    href: "/settings/users",
   },
 ];
 
@@ -438,9 +446,9 @@ function SidebarInner({ inDrawer = false }: { inDrawer?: boolean }) {
 
         setRoleKeys(Array.isArray(res.data.roleKeys) ? res.data.roleKeys : []);
         setPermissions(Array.isArray(res.data.permissions) ? res.data.permissions : []);
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (!alive) return;
-        setPermError(e?.message || "Failed to load permissions");
+        setPermError(e instanceof Error ? e.message : "Failed to load permissions");
         setRoleKeys([]);
         setPermissions([]);
       } finally {

@@ -1,21 +1,13 @@
 import { NextResponse } from "next/server";
-import { createSupabaseServerClient, createSupabaseAdminClient } from "@/lib/supabase/server";
+import { requirePermission } from "@/lib/authz";
+import { createSupabaseAdminClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-function jsonError(status: number, payload: any) {
+function jsonError(status: number, payload: Record<string, unknown>) {
   return NextResponse.json({ ok: false, ...payload }, { status });
-}
-
-function safeError(err: any) {
-  return {
-    message: err?.message ?? "Unknown error",
-    code: err?.code ?? null,
-    details: err?.details ?? null,
-    hint: err?.hint ?? null,
-  };
 }
 
 function isUuid(v: string) {
@@ -30,12 +22,7 @@ export async function POST(_req: Request, ctx: RouteContext) {
     if (!safeId) return jsonError(400, { error: "Missing invoice id" });
     if (!isUuid(safeId)) return jsonError(400, { error: "Invalid invoice id" });
 
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: userErr } = await supabase.auth.getUser();
-
-    if (userErr || !userRes.user) {
-      return jsonError(401, { error: "Unauthorized", supabaseError: safeError(userErr) });
-    }
+    await requirePermission("invoices.issue");
 
     const admin = createSupabaseAdminClient();
 
@@ -46,18 +33,12 @@ export async function POST(_req: Request, ctx: RouteContext) {
       .maybeSingle();
 
     if (checkErr) {
-      return jsonError(500, {
-        error: "Failed to load invoice",
-        supabaseError: safeError(checkErr),
-      });
+      console.error("[invoices/[id]/issue]", checkErr);
+      return jsonError(500, { error: "Failed to load invoice" });
     }
 
     if (!existing) {
       return jsonError(404, { error: "Invoice not found" });
-    }
-
-    if (String(existing.created_by) !== String(userRes.user.id)) {
-      return jsonError(403, { error: "Forbidden" });
     }
 
     if (String(existing.status ?? "").toUpperCase() === "ISSUED") {
@@ -75,15 +56,12 @@ export async function POST(_req: Request, ctx: RouteContext) {
         issued_at: new Date().toISOString(),
       })
       .eq("id", safeId)
-      .eq("created_by", userRes.user.id)
       .select("id, invoice_no, invoice_type, status, issued_at")
       .maybeSingle();
 
     if (error) {
-      return jsonError(500, {
-        error: "Failed to issue invoice",
-        supabaseError: safeError(error),
-      });
+      console.error("[invoices/[id]/issue]", error);
+      return jsonError(500, { error: "Failed to issue invoice" });
     }
 
     if (!data) {
@@ -91,8 +69,11 @@ export async function POST(_req: Request, ctx: RouteContext) {
     }
 
     return NextResponse.json({ ok: true, data });
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
     console.error("[POST /api/invoices/[id]/issue] fatal", e);
-    return jsonError(500, { error: e?.message ?? "Internal error" });
+    return jsonError(500, { error: "Internal error" });
   }
 }

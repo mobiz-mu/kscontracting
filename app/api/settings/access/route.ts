@@ -1,34 +1,15 @@
 import { NextResponse } from "next/server";
-import {
-  createSupabaseServerClient,
-  createSupabaseAdminClient,
-} from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/server";
+import { requirePermission } from "@/lib/authz";
 
 export const runtime = "nodejs";
 
-function jsonError(status: number, payload: any) {
+function jsonError(status: number, payload: Record<string, unknown>) {
   return NextResponse.json({ ok: false, ...payload }, { status });
-}
-
-function safeError(err: any) {
-  return {
-    message: err?.message ?? "Unknown error",
-    code: err?.code ?? null,
-    details: err?.details ?? null,
-    hint: err?.hint ?? null,
-  };
 }
 
 async function ensureSeedData() {
   const admin = createSupabaseAdminClient();
-
-  const { data: rolesCount } = await admin
-    .from("roles")
-    .select("id", { count: "exact", head: true });
-
-  const { data: permsCount } = await admin
-    .from("permissions")
-    .select("id", { count: "exact", head: true });
 
   const { count: roleCount } = await admin
     .from("roles")
@@ -55,29 +36,34 @@ async function ensureSeedData() {
       { key: "invoices.create", description: "Create invoices" },
       { key: "invoices.edit", description: "Edit invoices" },
       { key: "invoices.issue", description: "Issue invoices" },
-      { key: "payments.record", description: "Record payments" },
+      { key: "invoices.void", description: "Void invoices" },
+      { key: "invoices.share", description: "Create/revoke public invoice share links" },
+      { key: "payments.view", description: "View payments" },
+      { key: "payments.create", description: "Record payments" },
+      { key: "payments.record", description: "Record payments (legacy alias)" },
       { key: "quotations.view", description: "View quotations" },
       { key: "quotations.create", description: "Create quotations" },
+      { key: "quotations.edit", description: "Edit quotations" },
+      { key: "quotations.convert", description: "Convert quotations to invoices" },
       { key: "credit_notes.view", description: "View credit notes" },
       { key: "credit_notes.create", description: "Create credit notes" },
-      { key: "reports.view", description: "View reports" },
-      { key: "settings.manage", description: "Manage settings" },
+      { key: "credit_notes.issue", description: "Issue credit notes" },
+      { key: "contacts.view", description: "View customers, suppliers, sub-contractors" },
       { key: "contacts.manage", description: "Manage customers and suppliers" },
+      { key: "purchase_bills.view", description: "View purchase bills" },
+      { key: "purchase_bills.create", description: "Create purchase bills" },
+      { key: "purchase_bills.delete", description: "Delete purchase bills (admin only by default)" },
+      { key: "reports.view", description: "View reports" },
+      { key: "settings.manage", description: "Manage company settings" },
+      { key: "users.manage", description: "Manage users and role assignments" },
+      { key: "access.manage", description: "Manage the roles/permissions access matrix" },
     ]);
   }
 }
 
 export async function GET() {
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: userErr } = await supabase.auth.getUser();
-
-    if (userErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(userErr),
-      });
-    }
+    await requirePermission("access.manage");
 
     await ensureSeedData();
 
@@ -89,10 +75,8 @@ export async function GET() {
       .order("id", { ascending: true });
 
     if (rolesErr) {
-      return jsonError(500, {
-        error: "Failed to load roles",
-        supabaseError: safeError(rolesErr),
-      });
+      console.error("[settings/access GET] roles", rolesErr);
+      return jsonError(500, { error: "Failed to load roles" });
     }
 
     const { data: permissions, error: permsErr } = await admin
@@ -101,10 +85,8 @@ export async function GET() {
       .order("id", { ascending: true });
 
     if (permsErr) {
-      return jsonError(500, {
-        error: "Failed to load permissions",
-        supabaseError: safeError(permsErr),
-      });
+      console.error("[settings/access GET] permissions", permsErr);
+      return jsonError(500, { error: "Failed to load permissions" });
     }
 
     const { data: links, error: linksErr } = await admin
@@ -112,10 +94,8 @@ export async function GET() {
       .select("role_id,permission_id");
 
     if (linksErr) {
-      return jsonError(500, {
-        error: "Failed to load role permissions",
-        supabaseError: safeError(linksErr),
-      });
+      console.error("[settings/access GET] role_permissions", linksErr);
+      return jsonError(500, { error: "Failed to load role permissions" });
     }
 
     return NextResponse.json({
@@ -126,43 +106,62 @@ export async function GET() {
         role_permissions: links ?? [],
       },
     });
-  } catch (e: any) {
-    return jsonError(500, {
-      error: "Failed to load access settings",
-      supabaseError: safeError(e),
-    });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
+
+    console.error("[settings/access GET]", e);
+    return jsonError(500, { error: "Failed to load access settings" });
   }
 }
 
 export async function POST(req: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: userErr } = await supabase.auth.getUser();
-
-    if (userErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(userErr),
-      });
-    }
+    await requirePermission("access.manage");
 
     const body = await req.json().catch(() => ({}));
-    const matrix = Array.isArray(body?.matrix) ? body.matrix : [];
+    type RawMatrixEntry = { role_id?: unknown; permission_id?: unknown };
+    const matrix: RawMatrixEntry[] = Array.isArray(body?.matrix) ? body.matrix : [];
 
     const admin = createSupabaseAdminClient();
 
     const normalized = matrix
-      .map((x: any) => ({
+      .map((x) => ({
         role_id: Number(x?.role_id),
         permission_id: Number(x?.permission_id),
       }))
       .filter(
-        (x: any) =>
+        (x) =>
           Number.isFinite(x.role_id) &&
           x.role_id > 0 &&
           Number.isFinite(x.permission_id) &&
           x.permission_id > 0
       );
+
+    // Safety net: never allow the access matrix to be saved in a way that
+    // strips the admin role of settings/access management. Otherwise a
+    // mistake here could permanently lock everyone out of this screen.
+    const { data: adminRole } = await admin
+      .from("roles")
+      .select("id")
+      .eq("key", "admin")
+      .maybeSingle();
+
+    const { data: accessPerm } = await admin
+      .from("permissions")
+      .select("id")
+      .eq("key", "access.manage")
+      .maybeSingle();
+
+    if (adminRole?.id && accessPerm?.id) {
+      const alreadyIncluded = normalized.some(
+        (x) => x.role_id === adminRole.id && x.permission_id === accessPerm.id
+      );
+      if (!alreadyIncluded) {
+        normalized.push({ role_id: adminRole.id, permission_id: accessPerm.id });
+      }
+    }
 
     const { error: deleteErr } = await admin
       .from("role_permissions")
@@ -170,10 +169,8 @@ export async function POST(req: Request) {
       .neq("role_id", 0);
 
     if (deleteErr) {
-      return jsonError(500, {
-        error: "Failed to reset role permissions",
-        supabaseError: safeError(deleteErr),
-      });
+      console.error("[settings/access POST] delete", deleteErr);
+      return jsonError(500, { error: "Failed to reset role permissions" });
     }
 
     if (normalized.length > 0) {
@@ -182,10 +179,8 @@ export async function POST(req: Request) {
         .insert(normalized);
 
       if (insertErr) {
-        return jsonError(500, {
-          error: "Failed to save role permissions",
-          supabaseError: safeError(insertErr),
-        });
+        console.error("[settings/access POST] insert", insertErr);
+        return jsonError(500, { error: "Failed to save role permissions" });
       }
     }
 
@@ -193,10 +188,12 @@ export async function POST(req: Request) {
       ok: true,
       message: "Access permissions saved successfully",
     });
-  } catch (e: any) {
-    return jsonError(500, {
-      error: "Failed to save access settings",
-      supabaseError: safeError(e),
-    });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
+
+    console.error("[settings/access POST]", e);
+    return jsonError(500, { error: "Failed to save access settings" });
   }
 }

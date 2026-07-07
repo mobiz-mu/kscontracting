@@ -7,6 +7,7 @@ import { ArrowLeft, Save } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { getErrorMessage } from "@/lib/utils";
 
 export default function NewSubContractorPage() {
   const router = useRouter();
@@ -54,8 +55,8 @@ export default function NewSubContractorPage() {
       }
 
       router.push(`/contacts/sub-contractors/${json.data.id}`);
-    } catch (e: any) {
-      alert(e?.message || "Failed to create sub contractor");
+    } catch (e: unknown) {
+      alert(getErrorMessage(e, "Failed to create sub contractor"));
     } finally {
       setLoading(false);
     }

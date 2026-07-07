@@ -39,6 +39,12 @@ type QuoteApi = {
   customer_vat?: string | null;
   customer_brn?: string | null;
   customer_address?: string | null;
+  // Legacy/alternate field names some older records may still use.
+  client_name?: string | null;
+  client_address?: string | null;
+  client_brn?: string | null;
+  client_vat?: string | null;
+  customer_vat_no?: string | null;
   site_address?: string | null;
   quote_date: string | null;
   valid_until: string | null;
@@ -49,13 +55,13 @@ type QuoteApi = {
   items: QuoteItemApi[];
 };
 
-function n2(v: any) {
+function n2(v: unknown) {
   const n = Number(v ?? 0);
   return Number.isFinite(n) ? n : 0;
 }
 
 function getParamId(params: unknown): string {
-  const p = params as any;
+  const p = params as Record<string, unknown> | null;
   const raw = p?.id;
   if (Array.isArray(raw)) return String(raw[0] ?? "").trim();
   return String(raw ?? "").trim();
@@ -133,14 +139,14 @@ export default function PrintQuotationPage() {
       const j = await safeGet<{
         ok: boolean;
         data: QuoteApi;
-        error?: any;
+        error?: string;
       }>(`/api/quotations/${encodeURIComponent(id)}`);
 
       if (!j.ok) throw new Error(j?.error ?? "Quotation not found");
       setQuote(j.data ?? null);
       if (!j.data) setError("Quotation not found.");
-    } catch (e: any) {
-      setError(e?.message || "Failed to load quotation");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load quotation");
       setQuote(null);
     } finally {
       setLoading(false);
@@ -314,45 +320,45 @@ export default function PrintQuotationPage() {
    billTo: {
   name:
     quote.customer_name ||
-    (quote as any).client_name ||
+    quote.client_name ||
     "",
   address:
     quote.customer_address ||
-    (quote as any).client_address ||
+    quote.client_address ||
     quote.site_address ||
     "",
   brn:
     quote.customer_brn ||
-    (quote as any).client_brn ||
+    quote.client_brn ||
     "",
   vat:
     quote.customer_vat ||
-    (quote as any).customer_vat_no ||
-    (quote as any).client_vat ||
+    quote.customer_vat_no ||
+    quote.client_vat ||
     "",
   siteAddress: quote.site_address || "",
   lines: [
     quote.customer_name
       ? `Name: ${quote.customer_name}`
-      : (quote as any).client_name
-      ? `Name: ${(quote as any).client_name}`
+      : quote.client_name
+      ? `Name: ${quote.client_name}`
       : "",
     quote.customer_address
       ? `Address: ${quote.customer_address}`
-      : (quote as any).client_address
-      ? `Address: ${(quote as any).client_address}`
+      : quote.client_address
+      ? `Address: ${quote.client_address}`
       : "",
     quote.customer_brn
       ? `BRN No.: ${quote.customer_brn}`
-      : (quote as any).client_brn
-      ? `BRN No.: ${(quote as any).client_brn}`
+      : quote.client_brn
+      ? `BRN No.: ${quote.client_brn}`
       : "",
     quote.customer_vat
       ? `VAT No.: ${quote.customer_vat}`
-      : (quote as any).customer_vat_no
-      ? `VAT No.: ${(quote as any).customer_vat_no}`
-      : (quote as any).client_vat
-      ? `VAT No.: ${(quote as any).client_vat}`
+      : quote.customer_vat_no
+      ? `VAT No.: ${quote.customer_vat_no}`
+      : quote.client_vat
+      ? `VAT No.: ${quote.client_vat}`
       : "",
     quote.site_address ? `Site Address: ${quote.site_address}` : "",
   ].filter(Boolean),

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requirePermission } from "@/lib/authz";
 import {
-  createSupabaseServerClient,
   createSupabaseAdminClient,
 } from "@/lib/supabase/server";
 
@@ -10,17 +10,8 @@ type Ctx = {
   params: Promise<{ id: string }>;
 };
 
-function jsonError(status: number, payload: any) {
+function jsonError(status: number, payload: Record<string, unknown>) {
   return NextResponse.json({ ok: false, ...payload }, { status });
-}
-
-function safeError(err: any) {
-  return {
-    message: err?.message ?? "Unknown error",
-    code: err?.code ?? null,
-    details: err?.details ?? null,
-    hint: err?.hint ?? null,
-  };
 }
 
 function parseCustomerId(value: string) {
@@ -38,15 +29,7 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
       return jsonError(400, { error: "Invalid customer id" });
     }
 
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: uErr } = await supabase.auth.getUser();
-
-    if (uErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(uErr),
-      });
-    }
+    await requirePermission("contacts.view");
 
     const admin = createSupabaseAdminClient();
 
@@ -59,10 +42,8 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
       .maybeSingle();
 
     if (error) {
-      return jsonError(500, {
-        error: "Failed to load customer",
-        supabaseError: safeError(error),
-      });
+      console.error("[customers/[id]]", error);
+      return jsonError(500, { error: "Failed to load customer" });
     }
 
     if (!data) {
@@ -73,11 +54,12 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
       ok: true,
       data,
     });
-  } catch (e: any) {
-    return jsonError(500, {
-      error: "Internal error",
-      supabaseError: safeError(e),
-    });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
+    console.error("[customers/[id]]", e);
+      return jsonError(500, { error: "Internal error" });
   }
 }
 
@@ -90,15 +72,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       return jsonError(400, { error: "Invalid customer id" });
     }
 
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: uErr } = await supabase.auth.getUser();
-
-    if (uErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(uErr),
-      });
-    }
+    await requirePermission("contacts.manage");
 
     const admin = createSupabaseAdminClient();
     const body = await req.json().catch(() => ({}));
@@ -133,20 +107,19 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       .single();
 
     if (error) {
-      return jsonError(500, {
-        error: "Failed to update customer",
-        supabaseError: safeError(error),
-      });
+      console.error("[customers/[id]]", error);
+      return jsonError(500, { error: "Failed to update customer" });
     }
 
     return NextResponse.json({
       ok: true,
       data,
     });
-  } catch (e: any) {
-    return jsonError(500, {
-      error: "Internal error",
-      supabaseError: safeError(e),
-    });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
+    console.error("[customers/[id]]", e);
+      return jsonError(500, { error: "Internal error" });
   }
 }

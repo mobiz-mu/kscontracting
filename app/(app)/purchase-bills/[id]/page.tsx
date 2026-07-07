@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { getErrorMessage } from "@/lib/utils";
 
 type BillItem = {
   id: number;
@@ -49,7 +50,7 @@ type PurchaseBill = {
   items: BillItem[];
 };
 
-function money(v: any) {
+function money(v: unknown) {
   const n = Number(v ?? 0);
   return `Rs ${n.toLocaleString("en-MU", {
     minimumFractionDigits: 2,
@@ -60,7 +61,7 @@ function money(v: any) {
 export default function PurchaseBillDetailsPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
-  const id = String((params as any)?.id ?? "").trim();
+  const id = String((params as Record<string, unknown> | null)?.id ?? "").trim();
 
   const [row, setRow] = React.useState<PurchaseBill | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -82,8 +83,8 @@ export default function PurchaseBillDetailsPage() {
       }
 
       setRow(json.data ?? null);
-    } catch (e: any) {
-      setError(e?.message || "Failed to load purchase bill");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to load purchase bill"));
       setRow(null);
     } finally {
       setLoading(false);
@@ -108,8 +109,8 @@ export default function PurchaseBillDetailsPage() {
       }
 
       router.push("/purchase-bills");
-    } catch (e: any) {
-      alert(e?.message || "Failed to delete purchase bill");
+    } catch (e: unknown) {
+      alert(getErrorMessage(e, "Failed to delete purchase bill"));
     } finally {
       setDeleting(false);
     }
@@ -117,6 +118,7 @@ export default function PurchaseBillDetailsPage() {
 
   React.useEffect(() => {
     if (id) void load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: load on mount/param change only
   }, [id]);
 
   if (loading) {
@@ -163,7 +165,8 @@ export default function PurchaseBillDetailsPage() {
           <h2 className="mb-4 text-lg font-semibold">Bill Items</h2>
 
           <div className="overflow-hidden rounded-xl border">
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[560px] text-sm">
               <thead className="bg-slate-50">
                 <tr>
                   <th className="p-3 text-left">Description</th>
@@ -195,6 +198,7 @@ export default function PurchaseBillDetailsPage() {
                 )}
               </tbody>
             </table>
+            </div>
           </div>
 
           {row.notes ? (

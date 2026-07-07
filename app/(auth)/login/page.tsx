@@ -131,7 +131,6 @@ export default function LoginPage() {
                       <input
                         name="email"
                         type="email"
-                        defaultValue="admin@kscontracting.mu"
                         placeholder="Enter your email"
                         required
                         className="h-12 w-full rounded-2xl border border-slate-200 bg-white pl-10 pr-4 text-sm text-slate-900 outline-none transition focus:border-[#ff7a18] focus:ring-4 focus:ring-[#ff7a18]/10"
@@ -176,13 +175,7 @@ export default function LoginPage() {
                     )}
                   </button>
 
-                  <div className="flex items-center justify-between gap-3 pt-1 text-xs text-slate-500">
-                    <Link
-                      href="/register"
-                      className="font-semibold text-slate-600 transition hover:text-[#ff7a18]"
-                    >
-                      Register
-                    </Link>
+                  <div className="flex items-center justify-end gap-3 pt-1 text-xs text-slate-500">
                     <Link
                       href="/forgot-password"
                       className="font-semibold text-slate-600 transition hover:text-[#ff7a18]"

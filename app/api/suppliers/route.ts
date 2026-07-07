@@ -1,22 +1,13 @@
 import { NextResponse } from "next/server";
+import { requirePermission } from "@/lib/authz";
 import {
-  createSupabaseServerClient,
   createSupabaseAdminClient,
 } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
-function jsonError(status: number, payload: any) {
+function jsonError(status: number, payload: Record<string, unknown>) {
   return NextResponse.json({ ok: false, ...payload }, { status });
-}
-
-function safeError(err: any) {
-  return {
-    message: err?.message ?? "Unknown error",
-    code: err?.code ?? null,
-    details: err?.details ?? null,
-    hint: err?.hint ?? null,
-  };
 }
 
 function parsePositiveInt(value: string | null, fallback: number) {
@@ -31,15 +22,7 @@ function sanitizeSearch(value: string) {
 
 export async function POST(req: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: uErr } = await supabase.auth.getUser();
-
-    if (uErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(uErr),
-      });
-    }
+    await requirePermission("contacts.manage");
 
     const body = await req.json().catch(() => ({}));
 
@@ -66,32 +49,23 @@ export async function POST(req: Request) {
       .single();
 
     if (error) {
-      return jsonError(500, {
-        error: "Failed to create supplier",
-        supabaseError: safeError(error),
-      });
+      console.error("[suppliers]", error);
+      return jsonError(500, { error: "Failed to create supplier" });
     }
 
     return NextResponse.json({ ok: true, data }, { status: 201 });
-  } catch (e: any) {
-    return jsonError(500, {
-      error: e?.message ?? "Internal error",
-      supabaseError: safeError(e),
-    });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
+    console.error("[suppliers]", e);
+    return jsonError(500, { error: "Internal error" });
   }
 }
 
 export async function GET(req: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: uErr } = await supabase.auth.getUser();
-
-    if (uErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(uErr),
-      });
-    }
+    await requirePermission("contacts.view");
 
     const url = new URL(req.url);
     const q = sanitizeSearch((url.searchParams.get("q") ?? "").trim());
@@ -123,10 +97,8 @@ export async function GET(req: Request) {
     const { data, error, count } = await query.range(from, to);
 
     if (error) {
-      return jsonError(500, {
-        error: "Failed to load suppliers",
-        supabaseError: safeError(error),
-      });
+      console.error("[suppliers]", error);
+      return jsonError(500, { error: "Failed to load suppliers" });
     }
 
     const total = count ?? data?.length ?? 0;
@@ -144,10 +116,11 @@ export async function GET(req: Request) {
       },
       { status: 200 }
     );
-  } catch (e: any) {
-    return jsonError(500, {
-      error: e?.message ?? "Internal error",
-      supabaseError: safeError(e),
-    });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
+    console.error("[suppliers]", e);
+    return jsonError(500, { error: "Internal error" });
   }
 }

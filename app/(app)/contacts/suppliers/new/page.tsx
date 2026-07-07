@@ -7,11 +7,12 @@ import { ArrowLeft, Save } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { getErrorMessage } from "@/lib/utils";
 
 type ApiResp = {
   ok: boolean;
   data?: { id: number | string };
-  error?: any;
+  error?: string;
 };
 
 async function safeJson<T>(res: Response): Promise<T> {
@@ -70,8 +71,8 @@ export default function NewSupplierPage() {
       if (!j.ok || !j.data?.id) throw new Error(j?.error ?? "Failed to create supplier");
 
       router.push(`/contacts/suppliers/${encodeURIComponent(String(j.data.id))}`);
-    } catch (e: any) {
-      setErr(e?.message ?? "Failed to save supplier");
+    } catch (e: unknown) {
+      setErr(getErrorMessage(e, "Failed to save supplier"));
     } finally {
       setSaving(false);
     }

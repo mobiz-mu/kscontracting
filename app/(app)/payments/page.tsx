@@ -7,16 +7,13 @@ import {
   Plus,
   RefreshCw,
   Search,
-  Calendar,
-  Wallet,
-  Building2,
   FileText,
   ChevronRight,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 
 type PaymentRow = {
   id: string;
@@ -48,7 +45,7 @@ type ApiListResponse<T> = {
     totalAmount?: number;
     byMethod?: Record<string, number>;
   };
-  error?: any;
+  error?: string;
 };
 
 function money(n: number) {
@@ -115,8 +112,8 @@ export default function PaymentsPage() {
       );
       setRows(j.data ?? []);
       setKpi(j.kpi ?? {});
-    } catch (e: any) {
-      setError(e?.message || "Failed to load payments");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to load payments"));
       setRows([]);
       setKpi({});
     } finally {

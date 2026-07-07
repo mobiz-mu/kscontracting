@@ -2,11 +2,9 @@
 
 import * as React from "react";
 import {
-  Download,
   FileText,
   RefreshCw,
   Search,
-  Calendar,
   Users,
   Wallet,
   AlertTriangle,
@@ -17,7 +15,9 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
+import { ReportFilterBar, type ReportFilterValue } from "@/components/reports/ReportFilterBar";
+import { resolveDateRange } from "@/lib/reports/period";
 
 /* =========================================
    Types
@@ -31,6 +31,8 @@ type InvoiceRow = {
   invoice_date: string | null;
   status: string;
   total_amount: number | null;
+  paid_amount: number | null;
+  credited_amount: number | null;
   balance_amount: number | null;
   created_at: string | null;
 };
@@ -44,8 +46,7 @@ type InvoicesResponse = {
     total: number;
     hasMore: boolean;
   };
-  error?: any;
-  supabaseError?: any;
+  error?: string;
 };
 
 type SOARow = {
@@ -54,7 +55,8 @@ type SOARow = {
   invoiceCount: number;
   billed: number;
   outstanding: number;
-  settled: number;
+  paid: number;
+  credited: number;
   lastInvoiceDate: string | null;
 };
 
@@ -62,12 +64,12 @@ type SOARow = {
    Helpers
 ========================================= */
 
-function n2(v: any) {
+function n2(v: unknown) {
   const x = Number(v ?? 0);
   return Number.isFinite(x) ? x : 0;
 }
 
-function money(v: any) {
+function money(v: unknown) {
   const n = n2(v);
   return `Rs ${n.toLocaleString("en-US", {
     minimumFractionDigits: 2,
@@ -229,8 +231,15 @@ export default function SalesSOAPage() {
   const [err, setErr] = React.useState("");
   const [search, setSearch] = React.useState("");
   const [balanceFilter, setBalanceFilter] = React.useState<"ALL" | "OUTSTANDING" | "SETTLED">("ALL");
-  const [from, setFrom] = React.useState("");
-  const [to, setTo] = React.useState("");
+  const initialRange = resolveDateRange("this_month");
+  const [filters, setFilters] = React.useState<ReportFilterValue>({
+    period: "this_month",
+    from: initialRange.from,
+    to: initialRange.to,
+    group: "month",
+  });
+  const from = filters.from;
+  const to = filters.to;
   const [invoiceRows, setInvoiceRows] = React.useState<InvoiceRow[]>([]);
 
   const load = React.useCallback(async () => {
@@ -240,8 +249,8 @@ export default function SalesSOAPage() {
     try {
       const res = await safeGet<InvoicesResponse>("/api/invoices?page=1&pageSize=500");
       setInvoiceRows(Array.isArray(res.data) ? res.data : []);
-    } catch (e: any) {
-      setErr(e?.message || "Failed to load statement of account");
+    } catch (e: unknown) {
+      setErr(getErrorMessage(e, "Failed to load statement of account"));
       setInvoiceRows([]);
     } finally {
       setLoading(false);
@@ -279,18 +288,21 @@ export default function SalesSOAPage() {
         invoiceCount: 0,
         billed: 0,
         outstanding: 0,
-        settled: 0,
+        paid: 0,
+        credited: 0,
         lastInvoiceDate: null,
       };
 
       const total = n2(inv.total_amount);
       const balance = n2(inv.balance_amount);
-      const settled = Math.max(0, total - balance);
+      const paid = n2(inv.paid_amount);
+      const credited = n2(inv.credited_amount);
 
       existing.invoiceCount += 1;
       existing.billed += total;
       existing.outstanding += balance;
-      existing.settled += settled;
+      existing.paid += paid;
+      existing.credited += credited;
 
       if (!existing.lastInvoiceDate) {
         existing.lastInvoiceDate = invDateRaw ?? null;
@@ -327,14 +339,16 @@ export default function SalesSOAPage() {
   const totals = React.useMemo(() => {
     const customers = soaRows.length;
     const billed = soaRows.reduce((s, r) => s + n2(r.billed), 0);
-    const collected = soaRows.reduce((s, r) => s + n2(r.settled), 0);
+    const paid = soaRows.reduce((s, r) => s + n2(r.paid), 0);
+    const credited = soaRows.reduce((s, r) => s + n2(r.credited), 0);
     const outstanding = soaRows.reduce((s, r) => s + n2(r.outstanding), 0);
     const customersOutstanding = soaRows.filter((r) => r.outstanding > 0).length;
 
     return {
       customers,
       billed,
-      collected,
+      paid,
+      credited,
       outstanding,
       customersOutstanding,
     };
@@ -346,7 +360,8 @@ export default function SalesSOAPage() {
       "Customer Name",
       "Invoice Count",
       "Billed",
-      "Collected",
+      "Paid (Cash)",
+      "Credited",
       "Outstanding",
       "Last Invoice Date",
     ];
@@ -356,7 +371,8 @@ export default function SalesSOAPage() {
       r.customerName,
       r.invoiceCount,
       n2(r.billed).toFixed(2),
-      n2(r.settled).toFixed(2),
+      n2(r.paid).toFixed(2),
+      n2(r.credited).toFixed(2),
       n2(r.outstanding).toFixed(2),
       fmtDate(r.lastInvoiceDate),
     ]);
@@ -405,20 +421,21 @@ export default function SalesSOAPage() {
                 <RefreshCw className={cn("mr-2 size-4", loading && "animate-spin")} />
                 Refresh
               </Button>
-
-              <Button
-                className="rounded-2xl h-11 bg-[#071b38] text-white hover:bg-[#06142b] shadow-[0_16px_44px_rgba(7,27,56,0.18)]"
-                onClick={onExport}
-                disabled={soaRows.length === 0}
-              >
-                <Download className="mr-2 size-4" />
-                Export SOA
-              </Button>
             </div>
           </div>
 
+          <div className="mt-4">
+            <ReportFilterBar
+              value={filters}
+              onChange={setFilters}
+              showGrouping={false}
+              onExportCsv={onExport}
+              onPrint={() => window.print()}
+            />
+          </div>
+
           {/* Filters */}
-          <div className="mt-5 grid grid-cols-1 gap-3 xl:grid-cols-[1fr_auto_auto_auto]">
+          <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-[1fr_auto]">
             <div className="relative">
               <Search className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
               <Input
@@ -426,28 +443,6 @@ export default function SalesSOAPage() {
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search customer name or customer ID..."
                 className="h-11 rounded-2xl pl-10"
-              />
-            </div>
-
-            <div className="flex items-center gap-2 rounded-2xl bg-white/70 ring-1 ring-slate-200 px-3 h-11">
-              <Calendar className="size-4 text-slate-400" />
-              <span className="text-xs font-semibold text-slate-600">From</span>
-              <input
-                type="date"
-                value={from}
-                onChange={(e) => setFrom(e.target.value)}
-                className="bg-transparent text-sm font-semibold text-slate-900 outline-none"
-              />
-            </div>
-
-            <div className="flex items-center gap-2 rounded-2xl bg-white/70 ring-1 ring-slate-200 px-3 h-11">
-              <Calendar className="size-4 text-slate-400" />
-              <span className="text-xs font-semibold text-slate-600">To</span>
-              <input
-                type="date"
-                value={to}
-                onChange={(e) => setTo(e.target.value)}
-                className="bg-transparent text-sm font-semibold text-slate-900 outline-none"
               />
             </div>
 
@@ -474,7 +469,7 @@ export default function SalesSOAPage() {
       </div>
 
       {/* KPI */}
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
         <KPICard
           icon={Users}
           label="Customers"
@@ -491,9 +486,16 @@ export default function SalesSOAPage() {
         />
         <KPICard
           icon={Wallet}
-          label="Collected"
-          value={money(totals.collected)}
-          sub="Settled value"
+          label="Paid (Cash Collected)"
+          value={money(totals.paid)}
+          sub="Actual cash received"
+          tone="blue"
+        />
+        <KPICard
+          icon={Wallet}
+          label="Credited"
+          value={money(totals.credited)}
+          sub="Settled via credit notes, not cash"
           tone="blue"
         />
         <KPICard
@@ -511,7 +513,7 @@ export default function SalesSOAPage() {
           <div className="min-w-0">
             <div className="text-sm font-semibold text-slate-900">SOA View</div>
             <div className="mt-0.5 text-xs text-slate-600">
-              Customer-level billed, collected, and outstanding balances from live invoices.
+              Customer-level billed, paid (cash), credited (credit notes), and outstanding balances from live invoices.
             </div>
           </div>
 
@@ -521,17 +523,19 @@ export default function SalesSOAPage() {
         </div>
 
         <div className="overflow-hidden rounded-b-3xl border-t border-slate-200">
-          <div className="overflow-auto">
-            <table className="w-full min-w-[1080px] text-sm">
+          {/* Desktop table */}
+          <div className="hidden overflow-auto sm:block">
+            <table className="w-full min-w-[1180px] text-sm">
               <thead className="bg-slate-50 text-slate-600">
                 <tr className="[&>th]:px-5 [&>th]:py-3 [&>th]:text-left [&>th]:font-semibold">
                   <th className="w-[120px]">Customer ID</th>
                   <th>Customer Name</th>
-                  <th className="w-[140px] text-right">Invoices</th>
-                  <th className="w-[160px] text-right">Billed</th>
-                  <th className="w-[160px] text-right">Collected</th>
-                  <th className="w-[160px] text-right">Outstanding</th>
-                  <th className="w-[160px]">Last Invoice</th>
+                  <th className="w-[120px] text-right">Invoices</th>
+                  <th className="w-[150px] text-right">Billed</th>
+                  <th className="w-[150px] text-right">Paid (Cash)</th>
+                  <th className="w-[150px] text-right">Credited</th>
+                  <th className="w-[150px] text-right">Outstanding</th>
+                  <th className="w-[150px]">Last Invoice</th>
                   <th className="w-[140px]">Status</th>
                 </tr>
               </thead>
@@ -546,13 +550,14 @@ export default function SalesSOAPage() {
                       <td className="px-5 py-4 text-right"><div className="ml-auto h-4 w-24 rounded bg-slate-200" /></td>
                       <td className="px-5 py-4 text-right"><div className="ml-auto h-4 w-24 rounded bg-slate-200" /></td>
                       <td className="px-5 py-4 text-right"><div className="ml-auto h-4 w-24 rounded bg-slate-200" /></td>
+                      <td className="px-5 py-4 text-right"><div className="ml-auto h-4 w-24 rounded bg-slate-200" /></td>
                       <td className="px-5 py-4"><div className="h-4 w-24 rounded bg-slate-200" /></td>
                       <td className="px-5 py-4"><div className="h-6 w-24 rounded-full bg-slate-200" /></td>
                     </tr>
                   ))
                 ) : soaRows.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-5 py-12 text-center text-slate-500">
+                    <td colSpan={9} className="px-5 py-12 text-center text-slate-500">
                       No SOA data found for this filter.
                     </td>
                   </tr>
@@ -578,7 +583,11 @@ export default function SalesSOAPage() {
                         </td>
 
                         <td className="px-5 py-4 text-right font-semibold text-blue-700">
-                          {money(r.settled)}
+                          {money(r.paid)}
+                        </td>
+
+                        <td className="px-5 py-4 text-right font-semibold text-blue-500">
+                          {money(r.credited)}
                         </td>
 
                         <td className={cn(
@@ -618,13 +627,76 @@ export default function SalesSOAPage() {
                       TOTALS
                     </td>
                     <td className="text-right text-slate-900">{money(totals.billed)}</td>
-                    <td className="text-right text-blue-700">{money(totals.collected)}</td>
+                    <td className="text-right text-blue-700">{money(totals.paid)}</td>
+                    <td className="text-right text-blue-500">{money(totals.credited)}</td>
                     <td className="text-right text-slate-900">{money(totals.outstanding)}</td>
                     <td colSpan={2} />
                   </tr>
                 </tfoot>
               ) : null}
             </table>
+          </div>
+
+          {/* Mobile cards */}
+          <div className="space-y-3 p-4 sm:hidden">
+            {loading ? (
+              <div className="py-8 text-center text-sm text-slate-500">Loading…</div>
+            ) : soaRows.length === 0 ? (
+              <div className="py-8 text-center text-sm text-slate-500">
+                No SOA data found for this filter.
+              </div>
+            ) : (
+              soaRows.map((r) => {
+                const outstanding = n2(r.outstanding);
+                const settled = outstanding <= 0;
+
+                return (
+                  <div
+                    key={`${r.customerId}-${r.customerName}`}
+                    className="rounded-2xl border border-slate-200 bg-white p-4"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate font-semibold text-slate-900">{r.customerName}</div>
+                        <div className="mt-0.5 text-xs text-slate-500">
+                          {r.invoiceCount} invoice{r.invoiceCount === 1 ? "" : "s"} • {fmtDate(r.lastInvoiceDate)}
+                        </div>
+                      </div>
+                      {settled ? (
+                        <span className="inline-flex shrink-0 items-center rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
+                          Settled
+                        </span>
+                      ) : (
+                        <span className="inline-flex shrink-0 items-center rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800 ring-1 ring-amber-200">
+                          Outstanding
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <div className="text-slate-500">Billed</div>
+                        <div className="font-semibold text-slate-900">{money(r.billed)}</div>
+                      </div>
+                      <div>
+                        <div className="text-slate-500">Paid (Cash)</div>
+                        <div className="font-semibold text-blue-700">{money(r.paid)}</div>
+                      </div>
+                      <div>
+                        <div className="text-slate-500">Credited</div>
+                        <div className="font-semibold text-blue-500">{money(r.credited)}</div>
+                      </div>
+                      <div>
+                        <div className="text-slate-500">Outstanding</div>
+                        <div className={cn("font-extrabold", settled ? "text-emerald-700" : "text-slate-900")}>
+                          {money(r.outstanding)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
       </Card3D>

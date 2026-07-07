@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { ArrowLeft, Calendar, CreditCard, Building2, MapPin, FileText, Wallet, Printer } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { getErrorMessage } from "@/lib/utils";
 
 type PaymentData = {
   id: string;
@@ -27,7 +28,7 @@ type PaymentData = {
 type ApiResponse<T> = {
   ok: boolean;
   data?: T;
-  error?: any;
+  error?: string;
 };
 
 function money(n: number) {
@@ -100,9 +101,9 @@ export default function PaymentDetailsPage() {
         const j = await safeGet<ApiResponse<PaymentData>>(`/api/payments/${encodeURIComponent(id)}`);
         if (!alive) return;
         setData(j.data ?? null);
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (!alive) return;
-        setError(e?.message || "Failed to load payment");
+        setError(getErrorMessage(e, "Failed to load payment"));
         setData(null);
       } finally {
         if (alive) setLoading(false);

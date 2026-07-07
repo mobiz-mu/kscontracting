@@ -3,23 +3,15 @@ import {
   createSupabaseServerClient,
   createSupabaseAdminClient,
 } from "@/lib/supabase/server";
+import { requirePermission } from "@/lib/authz";
 
 export const runtime = "nodejs";
 
-function jsonError(status: number, payload: any) {
+function jsonError(status: number, payload: Record<string, unknown>) {
   return NextResponse.json({ ok: false, ...payload }, { status });
 }
 
-function safeError(err: any) {
-  return {
-    message: err?.message ?? "Unknown error",
-    code: err?.code ?? null,
-    details: err?.details ?? null,
-    hint: err?.hint ?? null,
-  };
-}
-
-function n2(v: any) {
+function n2(v: unknown) {
   const x = Number(v ?? 0);
   return Number.isFinite(x) ? x : 0;
 }
@@ -65,14 +57,14 @@ async function ensureSettingsRow() {
 
 export async function GET() {
   try {
+    // Any authenticated user may read company settings (e.g. invoice prefix,
+    // VAT rate) since it's needed to create invoices/quotations. Only
+    // updating settings is admin-only (enforced in POST below).
     const supabase = await createSupabaseServerClient();
     const { data: userRes, error: userErr } = await supabase.auth.getUser();
 
     if (userErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(userErr),
-      });
+      return jsonError(401, { error: "Unauthorized" });
     }
 
     const row = await ensureSettingsRow();
@@ -81,25 +73,15 @@ export async function GET() {
       ok: true,
       data: row,
     });
-  } catch (e: any) {
-    return jsonError(500, {
-      error: "Failed to load company settings",
-      supabaseError: safeError(e),
-    });
+  } catch (e: unknown) {
+    console.error("[settings/company GET]", e);
+    return jsonError(500, { error: "Failed to load company settings" });
   }
 }
 
 export async function POST(req: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: userRes, error: userErr } = await supabase.auth.getUser();
-
-    if (userErr || !userRes.user) {
-      return jsonError(401, {
-        error: "Unauthorized",
-        supabaseError: safeError(userErr),
-      });
-    }
+    await requirePermission("settings.manage");
 
     const body = await req.json().catch(() => ({}));
     const admin = createSupabaseAdminClient();
@@ -139,20 +121,20 @@ export async function POST(req: Request) {
       .single();
 
     if (error) {
-      return jsonError(500, {
-        error: "Failed to save company settings",
-        supabaseError: safeError(error),
-      });
+      console.error("[settings/company POST]", error);
+      return jsonError(500, { error: "Failed to save company settings" });
     }
 
     return NextResponse.json({
       ok: true,
       data,
     });
-  } catch (e: any) {
-    return jsonError(500, {
-      error: "Failed to save company settings",
-      supabaseError: safeError(e),
-    });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "Unauthorized") return jsonError(401, { error: "Unauthorized" });
+    if (msg === "Forbidden") return jsonError(403, { error: "Forbidden" });
+
+    console.error("[settings/company POST]", e);
+    return jsonError(500, { error: "Failed to save company settings" });
   }
 }

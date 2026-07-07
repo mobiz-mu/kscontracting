@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { getErrorMessage } from "@/lib/utils";
 
 type InvoiceRow = {
   id: string;
@@ -25,10 +25,10 @@ type InvoiceRow = {
 type ApiListResponse<T> = {
   ok: boolean;
   data?: T[];
-  error?: any;
+  error?: string;
 };
 
-function n2(v: any) {
+function n2(v: unknown) {
   const x = Number(v ?? 0);
   return Number.isFinite(x) ? x : 0;
 }
@@ -104,9 +104,9 @@ export default function NewPaymentPage() {
         const rows = (j.data ?? []).filter((r) => n2(r.balance_amount) > 0);
         if (!alive) return;
         setInvoiceList(rows);
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (!alive) return;
-        setError(e?.message || "Failed to load invoices");
+        setError(getErrorMessage(e, "Failed to load invoices"));
         setInvoiceList([]);
       } finally {
         if (alive) setLoading(false);
@@ -177,8 +177,8 @@ export default function NewPaymentPage() {
       }
 
       router.push(`/payments/${encodeURIComponent(j.data.id)}`);
-    } catch (e: any) {
-      setError(e?.message || "Failed to save payment");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Failed to save payment"));
     } finally {
       setSaving(false);
     }
